@@ -1,0 +1,17 @@
+*.pdf
+*.zip
+*.png
+*.pth
+*.tar
+*.ipynb
+__pycache__/
+checkpoint/
+checkpoints/
+log/
+logs/
+data/
+runs/
+docs/
+.ipynb_checkpoints/
+graph/
+!*.*
