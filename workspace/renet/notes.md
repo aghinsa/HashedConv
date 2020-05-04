@@ -1,0 +1,2 @@
+* [Pytorch cifar10](https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html)
+* [ReNet Implementation](https://github.com/hydxqing/ReNet-pytorch-keras-chapter3/blob/master/ReNet-pytorch/renet.py)
