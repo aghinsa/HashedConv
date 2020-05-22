@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from alexnet import AlexNet as AlexNetNoHash
 from utils import evaluate,cifar10_loader,get_weight_bins
-
+from torch.distributions import Categorical
 
 BATCH_SIZE = 2048
 N_EPOCHS = 1000
@@ -55,12 +55,14 @@ class HashedConv(nn.Conv2d):
 
         prob = torch.matmul(prob, self.polynomial_weights.t()) # [M,n_bins]
         prob = prob + self.polynomial_biases.t()
+        prob = prob - self.bins.view(1,-1)
+        prob = 1/1+torch.pow(prob,2)
 
         # gumbel-softmax requires inputs to be unnormalized log probablities
         # so no need to take softmax over prob
         prob = F.gumbel_softmax(prob,tau = 1 , hard = True) # [M,n_dim]
         # prob = self.softmax(prob) # [M,n_dim]
-
+        self.prob = prob
         new_weight = (prob*self.bins).sum(dim=-1).view(self.weight.size() )
         out = self.conv2d_forward(x,new_weight)
         return out
@@ -147,9 +149,14 @@ class AlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
-def get_loss(labels,preds):
+def get_loss(labels,preds,model):
     ce = nn.CrossEntropyLoss(reduction="mean")
     l1 = ce(preds,labels)
+    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
+    for layer in layers:
+        prob = getattr(model,layer).prob
+        entropy = Categorical(probs = prob).entropy().sum()
+        l1 += entropy
     return l1
 
 if __name__ == "__main__":
@@ -189,7 +196,7 @@ if __name__ == "__main__":
             preds = model(inputs)
             _,logits = torch.max(preds,1)
 
-            loss= get_loss(labels,preds)
+            loss= get_loss(labels,preds,model)
 
             loss.backward()
             optimizer.step()
