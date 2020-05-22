@@ -130,19 +130,15 @@ class AlexNet(nn.Module):
     def forward(self, x):
         x= self.conv1(x)
         x = self.ops1(x)
-        x = self.bn1(x)
 
         x= self.conv2(x)
         x = self.ops2(x)
-        x = self.bn2(x)
 
         x =  self.conv3(x)
         x =  self.ops3(x)
-        x = self.bn3(x)
 
         x=  self.conv4(x)
         x =  self.ops4(x)
-        x = self.bn4(x)
 
         x  =  self.conv5(x)
         x =  self.ops5(x)
@@ -151,14 +147,13 @@ class AlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
-    def pretrain_hash(self,pretrained_model,pretraining_epoch=100):
-
+    def pretrain_hash(self,pretrained_model,trainloader,pretraining_epoch=100):
         optimizer = torch.optim.Adam(self.parameters())
         print("Pretraining...")
         for epoch in range(pretraining_epoch):
             optimizer.zero_grad()
             loss = get_model_hashed_weight_loss(self,pretrained_model)
-            loss.backward(retain_graph=True)
+            loss.backward()
             optimizer.step()
             print(f"{epoch}: {loss}")
         print("pretrain complete")
@@ -227,57 +222,57 @@ if __name__ == "__main__":
 
     model.custom_init(pretrained_model,n_bins=16)
 
-    if CUDA:
-        model.cuda()
-        pretrained_model.cuda()
+    # if CUDA:
+    #     model.cuda()
+    #     pretrained_model.cuda()
 
 
-    optimizer = torch.optim.Adam(model.parameters())
-    writer = SummaryWriter()
+    # optimizer = torch.optim.Adam(model.parameters())
+    # writer = SummaryWriter()
 
-    global_step = 0
+    # global_step = 0
 
-    for epoch in range(1,N_EPOCHS+1):
+    # for epoch in range(1,N_EPOCHS+1):
 
-        for i, data in enumerate(trainloader, 0):
-            inputs, labels = data
+    #     for i, data in enumerate(trainloader, 0):
+    #         inputs, labels = data
 
-            if CUDA:
-                inputs = inputs.cuda()
-                labels = labels.cuda()
-
-
-            optimizer.zero_grad()
-
-            preds = model(inputs)
-            _,logits = torch.max(preds,1)
-
-            # loss= get_loss(labels,preds) + get_model_hashed_weight_loss(model,pretrained_model)
-            # loss=  get_model_hashed_weight_loss(model,pretrained_model)
-            loss = get_loss(labels,preds,model)
-
-            loss.backward(retain_graph = True)
-            optimizer.step()
-
-            writer.add_scalar('loss/train', loss , global_step)
-
-            global_step+=1
-            print(f"loss:{loss}")
-            if(global_step % 4 == 0):
-                model.pretrain_hash(pretrained_model,100)
+    #         if CUDA:
+    #             inputs = inputs.cuda()
+    #             labels = labels.cuda()
 
 
-        if epoch%10==0:
-            torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+    #         optimizer.zero_grad()
+
+    #         preds = model(inputs)
+    #         _,logits = torch.max(preds,1)
+
+    #         # loss= get_loss(labels,preds) + get_model_hashed_weight_loss(model,pretrained_model)
+    #         # loss=  get_model_hashed_weight_loss(model,pretrained_model)
+    #         loss = get_loss(labels,preds,model)
+
+    #         loss.backward(retain_graph = True)
+    #         optimizer.step()
+
+    #         writer.add_scalar('loss/train', loss , global_step)
+
+    #         global_step+=1
+    #         print(f"loss:{loss}")
+    #         # if(global_step % 4 == 0):
+    #         #     model.pretrain_hash(pretrained_model,100)
 
 
-            model.eval()
-            test_acc = evaluate(model,testloader,cuda = CUDA)
-            train_acc = evaluate(model,trainloader,cuda = CUDA)
+    #     if epoch%10==0:
+    #         torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
 
-            print(f"Epoch {epoch} complete:")
-            print(f"\ttest Accuracy : {test_acc}")
-            print(f"\ttrain Accuracy : {train_acc}")
-            model.train()
 
-    print('Finished Training')
+    #         model.eval()
+    #         test_acc = evaluate(model,testloader,cuda = CUDA)
+    #         train_acc = evaluate(model,trainloader,cuda = CUDA)
+
+    #         print(f"Epoch {epoch} complete:")
+    #         print(f"\ttest Accuracy : {test_acc}")
+    #         print(f"\ttrain Accuracy : {train_acc}")
+    #         model.train()
+
+    # print('Finished Training')
