@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import torchvision
 import torchvision.transforms as transforms
 
@@ -33,3 +34,7 @@ def cifar10_loader(batch_size=512,data_path="./data"):
                                         shuffle=False, num_workers=4)
     return trainloader,testloader
 
+
+def get_weight_bins(arr,n_bins):
+    hist,bin_edges = np.histogram(arr, bins=n_bins-1)
+    return bin_edges

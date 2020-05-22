@@ -9,7 +9,7 @@ import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
-from utils import evaluate,cifar10_loader
+from utils import evaluate,cifar10_loader,get_weight_bins
 
 BATCH_SIZE = 4096
 N_EPOCHS = 50

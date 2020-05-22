@@ -2,15 +2,18 @@
 #source : https://github.com/icpm/pytorch-cifar10/blob/master/models/AlexNet.py
 
 import torch
-import torch.nn as nn
-import torchvision
-import torchvision.transforms as transforms
 import numpy as np
+import torchvision
+import torch.nn as nn
+import torchvision.transforms as transforms
 
-from torch.utils.tensorboard import SummaryWriter
-import torch.nn.functional as F
 import torch.optim as optim
-from utils import evaluate,cifar10_loader
+import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
+
+from alexnet import AlexNet as AlexNetNoHash
+from utils import evaluate,cifar10_loader,get_weight_bins
+
 
 BATCH_SIZE = 2048
 N_EPOCHS = 1000
@@ -80,7 +83,7 @@ class AlexNet(nn.Module):
                 nn.MaxPool2d(kernel_size=2),
             )
         self.bn2 = nn.BatchNorm2d(192)
-        
+
         self.conv3 = HashedConv(192, 384, kernel_size=3, padding=1,)
         self.ops3 = nn.ReLU(inplace=True)
         self.bn3 = nn.BatchNorm2d(384)
@@ -105,6 +108,19 @@ class AlexNet(nn.Module):
             nn.Linear(4096, num_classes),
         )
         self.softmax = nn.Softmax(dim=1)
+
+    def custom_init(self,pretrained_model,n_bins):
+        layers = [ "conv1","conv2","conv3","conv4","conv5" ]
+
+        for layer in layers:
+            pretrained = getattr(pretrained_model,layer)
+            curr = getattr(self,layer)
+
+            trained_weight = pretrained.weight.clone().detach()
+            bins = get_weight_bins(trained_weight.cpu(), n_bins)
+            curr.bins = nn.Parameter(torch.from_numpy(bins))
+
+            curr.weight = nn.Parameter(trained_weight)
 
     def forward(self, x):
         x= self.conv1(x)
@@ -145,13 +161,13 @@ if __name__ == "__main__":
     CUDA =True
 
     model = AlexNet()
-
-    if LOAD_CKPT is not None:
-        LOAD_CKPT = f"./checkpoint/model_{LOAD_CKPT}"
-        model.load_state_dict(torch.load(LOAD_CKPT))
+    pretrained_model = AlexNetNoHash()
+    pretrained_model.load_state_dict(torch.load("./alexnet_pretrained"))
+    model.custom_init(pretrained_model,n_bins=16)
 
     if CUDA:
         model.cuda()
+
     optimizer = torch.optim.Adam(model.parameters())
     writer = SummaryWriter()
 
