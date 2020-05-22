@@ -29,8 +29,9 @@ class HashedConv(nn.Conv2d):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.n_bins = 16
-        self.bins = None
+        self.bins = nn.Parameter(torch.randn(self.n_bins))
         self.weight = None
+        self.centroids = None # keeps initial bins
 
         # Have n_bins number of polynomial each with n_bins + 2 coefficients
         # the Pi(X) outputs a similarity measure of how close X is to bin i
@@ -64,6 +65,7 @@ class HashedConv(nn.Conv2d):
         # prob = self.softmax(prob) # [M,n_dim]
         self.prob = prob
         new_weight = (prob*self.bins).sum(dim=-1).view(self.weight.size() )
+        self.new_weight = new_weight
         out = self.conv2d_forward(x,new_weight)
         return out
 
@@ -121,8 +123,8 @@ class AlexNet(nn.Module):
 
             trained_weight = pretrained.weight.clone().detach()
             bins = get_weight_bins(trained_weight.cpu(), n_bins)
-            curr.bins = torch.from_numpy(bins).cuda()
-
+            curr.bins = nn.Parameter(torch.from_numpy(bins).cuda())
+            curr.centroids = torch.from_numpy(bins).cuda()
             curr.weight = nn.Parameter(trained_weight)
 
     def forward(self, x):
@@ -149,15 +151,34 @@ class AlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
-def get_loss(labels,preds,model):
+def get_loss(labels,preds):
     ce = nn.CrossEntropyLoss(reduction="mean")
     l1 = ce(preds,labels)
     layers = [ "conv1","conv2","conv3","conv4","conv5" ]
-    for layer in layers:
-        prob = getattr(model,layer).prob
-        entropy = Categorical(probs = prob).entropy().sum()
-        l1 += entropy
+
     return l1
+
+def get_model_hashed_weight_loss(model,pretrained_model):
+    mse_fn = nn.MSELoss(reduce="mean")
+
+    entropy_loss = 0
+    mse_loss = 0
+
+    # mse loss for each weight with the already hashed weights
+    # entropy loss for prob in each layer
+    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
+    for layer in layers:
+        model_layer = getattr(model,layer)
+        pretrained_layer = getattr(pretrained_model ,layer)
+        entropy_loss += Categorical(probs = model_layer.prob).entropy().sum()
+
+        mse_loss +=(
+            mse_fn(model_layer.new_weight,pretrained_layer.weight) +
+            mse_fn(model_layer.bins,model_layer.centroids.cuda())
+        )
+    return entropy_loss + mse_loss
+
+
 
 if __name__ == "__main__":
     trainloader,testloader = cifar10_loader(batch_size=128,data_path="../data")
@@ -175,6 +196,7 @@ if __name__ == "__main__":
 
     if CUDA:
         model.cuda()
+        pretrained_model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters())
     writer = SummaryWriter()
@@ -196,7 +218,8 @@ if __name__ == "__main__":
             preds = model(inputs)
             _,logits = torch.max(preds,1)
 
-            loss= get_loss(labels,preds,model)
+            # loss= get_loss(labels,preds) + get_model_hashed_weight_loss(model,pretrained_model)
+            loss=  get_model_hashed_weight_loss(model,pretrained_model)
 
             loss.backward()
             optimizer.step()
