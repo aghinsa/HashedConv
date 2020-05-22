@@ -151,32 +151,49 @@ class AlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
-def get_loss(labels,preds):
+    def pretrain_hash(self,pretrained_model,pretraining_epoch=100):
+
+        optimizer = torch.optim.Adam(self.parameters())
+        print("Pretraining...")
+        for epoch in range(pretraining_epoch):
+            optimizer.zero_grad()
+            loss = get_model_hashed_weight_loss(self,pretrained_model)
+            loss.backward(retain_graph=True)
+            optimizer.step()
+            print(f"{epoch}: {loss}")
+        print("pretrain complete")
+        # torch.save(self.state_dict(), f"./pretrained_hash_vals")
+
+
+
+
+def get_loss(labels,preds,model):
     ce = nn.CrossEntropyLoss(reduction="mean")
     l1 = ce(preds,labels)
-    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
 
-    return l1
+    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
+    entropy_loss = 0
+    for layer in layers:
+        model_layer = getattr(model,layer)
+        entropy_loss += Categorical(probs = model_layer.prob).entropy().sum()
+
+    return l1 + entropy_loss
 
 def get_model_hashed_weight_loss(model,pretrained_model):
-    mse_fn = nn.MSELoss(reduce="mean")
-
-    entropy_loss = 0
+    mse_fn = nn.MSELoss(reduction="sum")
     mse_loss = 0
-
     # mse loss for each weight with the already hashed weights
     # entropy loss for prob in each layer
     layers = [ "conv1","conv2","conv3","conv4","conv5" ]
     for layer in layers:
         model_layer = getattr(model,layer)
         pretrained_layer = getattr(pretrained_model ,layer)
-        entropy_loss += Categorical(probs = model_layer.prob).entropy().sum()
 
         mse_loss +=(
             mse_fn(model_layer.new_weight,pretrained_layer.weight) +
             mse_fn(model_layer.bins,model_layer.centroids.cuda())
         )
-    return entropy_loss + mse_loss
+    return mse_loss
 
 
 
@@ -188,15 +205,32 @@ if __name__ == "__main__":
 
 
     CUDA =True
+    n_bins = 16
 
     model = AlexNet()
     pretrained_model = AlexNetNoHash()
     pretrained_model.load_state_dict(torch.load("./alexnet_pretrained"))
+
+    # Hashing to nearest bin value
+
+    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
+    for layer in layers:
+        pretrained_layer = getattr(pretrained_model ,layer)
+        weights = pretrained_layer.weight.clone().detach().cpu()
+        centroids =  get_weight_bins(weights , n_bins)
+        idxs = np.abs(weights.reshape(-1,1) - centroids.reshape(1,-1))
+        idxs = np.argmin(idxs,1)
+        new_weights = centroids[idxs].reshape(weights.shape)
+        pretrained_layer.weight = nn.Parameter(torch.from_numpy(new_weights))
+
+    ####
+
     model.custom_init(pretrained_model,n_bins=16)
 
     if CUDA:
         model.cuda()
         pretrained_model.cuda()
+
 
     optimizer = torch.optim.Adam(model.parameters())
     writer = SummaryWriter()
@@ -219,15 +253,18 @@ if __name__ == "__main__":
             _,logits = torch.max(preds,1)
 
             # loss= get_loss(labels,preds) + get_model_hashed_weight_loss(model,pretrained_model)
-            loss=  get_model_hashed_weight_loss(model,pretrained_model)
+            # loss=  get_model_hashed_weight_loss(model,pretrained_model)
+            loss = get_loss(labels,preds,model)
 
-            loss.backward()
+            loss.backward(retain_graph = True)
             optimizer.step()
 
             writer.add_scalar('loss/train', loss , global_step)
 
             global_step+=1
             print(f"loss:{loss}")
+            if(global_step % 4 == 0):
+                model.pretrain_hash(pretrained_model,100)
 
 
         if epoch%10==0:
