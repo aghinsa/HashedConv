@@ -29,7 +29,8 @@ class HashedConv(nn.Conv2d):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.n_bins = 16
-        self.bins = nn.Parameter(torch.randn(self.n_bins))
+        self.bins = None
+        self.weight = None
 
         # Have n_bins number of polynomial each with n_bins + 2 coefficients
         # the Pi(X) outputs a similarity measure of how close X is to bin i
@@ -42,7 +43,7 @@ class HashedConv(nn.Conv2d):
     def forward(self,x):
         # constructing probability matrix
         # prob = self.weight.clone().detach().view(-1,1) # [M,1]
-        prob = self.weight.view(-1,1) # [M,1]
+        prob = self.weight.detach().view(-1,1) # [M,1]
 
         prob = torch.cat(
             [
@@ -57,7 +58,7 @@ class HashedConv(nn.Conv2d):
 
         # gumbel-softmax requires inputs to be unnormalized log probablities
         # so no need to take softmax over prob
-        prob = F.gumbel_softmax(prob,tau = 0.5 , hard = True) # [M,n_dim]
+        prob = F.gumbel_softmax(prob,tau = 1 , hard = True) # [M,n_dim]
         # prob = self.softmax(prob) # [M,n_dim]
 
         new_weight = (prob*self.bins).sum(dim=-1).view(self.weight.size() )
@@ -118,7 +119,7 @@ class AlexNet(nn.Module):
 
             trained_weight = pretrained.weight.clone().detach()
             bins = get_weight_bins(trained_weight.cpu(), n_bins)
-            curr.bins = nn.Parameter(torch.from_numpy(bins))
+            curr.bins = torch.from_numpy(bins).cuda()
 
             curr.weight = nn.Parameter(trained_weight)
 
