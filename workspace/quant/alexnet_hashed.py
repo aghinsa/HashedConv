@@ -41,58 +41,86 @@ class HashedConv(nn.Conv2d):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.n_bins = 4
-
-        # self.bins = init_by_power(self.n_bins).cuda()
-        self.bins = (torch.rand(self.n_bins,1)).cuda()
+        self.n_fs = 16
+        # self.w.size (outc,inc,k,k)
+        self.n_out = self.weight.size()[0]
+        self.n_fs = min(self.n_fs,self.n_out)
+        self.f_bins = torch.rand(self.n_fs,self.n_bins,).cuda()
 
 
         self.all_encodings = np.array(get_binary_encodings(self.n_bins))
         self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bins,n_bins]
         self.all_encodings = self.all_encodings.float().cuda()
 
-        self.sgd = SGDRegressor(max_iter=1000, tol=1e-3,warm_start=True)
+        self.sgd = SGDRegressor(max_iter=100, tol=1e-3,warm_start=True)
         self.selected_encoding = None
 
     def forward(self,x):
 
+        # Calculating function coefficients
         with torch.no_grad():
-            w = self.weight.clone()
-            w = w.reshape(-1,1)
-            wr = w
-            for _ in range(10):
-                quant_levels = torch.matmul(self.all_encodings, self.bins) # [2^nb,1]
-                w = torch.pow( w - quant_levels.t() ,2) # [m,2^nb]
-                idx = torch.argmin(w,dim = -1)
-                selected_encoding = self.all_encodings[idx]
+            w_master = self.weight.clone().detach()
 
-                print(f"s : {selected_encoding.size()}")
+            # Optimizing hashed weights
+            for _ in range(2):
+                channel_step = self.out_channels//self.n_fs
+                new_fs = []
+                new_ws = []
 
-                # self.sgd.fit(selected_encoding.cpu(),wr.cpu().view(-1))
-                # new_bins = self.sgd.coef_
-                # new_bins = torch.from_numpy(new_bins).reshape(-1,1).float().cuda()
+                for fidx in range(0,self.n_fs):
+                    # select hash functions for the channel batch
+                    f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
 
-                # updating bins
-                s = selected_encoding #[m,nb]
+                    if fidx != self.n_fs-1:
+                        wx = w_master[fidx*channel_step:(fidx+1)*channel_step,:,:,: ] # [channel_step,inc,k,k]
+                    else:
+                        wx = w_master[fidx*channel_step:,:,:,: ] # [channel_step,inc,k,k]
 
-                st = s.t() #[nb,m]
-                new_bins = torch.matmul(st,s) #[nb,nb]
-                new_bins = torch.inverse(new_bins)
-                new_bins = torch.matmul(new_bins,st) # [nb,m]
-                new_bins = torch.matmul(new_bins,wr) #[nb,1]
+                    # finding encoding for qhich quant level is closest to w
+                    w = wx.reshape(-1,1)
+                    quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
+
+                    w = torch.abs( w - quant_levels.t()) # [m,2^nb]
+                    
+                    idx = torch.argmin(w,dim = -1)
+
+                    selected_encoding = self.all_encodings[idx] #[m,nbins]
+
+                    # From the selected encodings generate hash values
+                    new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
+                    new_ws.append(new_w)
+
+                    # optimizing coefficients which minimizes square loss with
+                    # current unhashed weights
+                    if self.training:
+                        self.sgd.fit(selected_encoding.cpu(),wx.reshape(-1).cpu())
+                        f_new_bin = self.sgd.coef_
+                        f_new_bin = torch.from_numpy(f_new_bin).reshape(1,-1).float().cuda()
+                        new_fs.append(f_new_bin)
+
+                        # s = selected_encoding #[m,nb]
+
+                        # st = s.t() #[nb,m]
+                        # new_bins = torch.matmul(st,s) #[nb,nb]
+                        # new_bins = torch.inverse(new_bins)
+                        # new_bins = torch.matmul(new_bins,st) # [nb,m]
+                        # new_bins = torch.matmul(new_bins,wx.reshape(-1,1)) #[nb,1]
+
+                weight_hashed = torch.cat(new_ws,axis=0)
+                self.weight_hashed = weight_hashed
+
+                if self.training:
+                    new_fs = torch.cat(new_fs,axis=0)
+                    alpha = 0.9
+                    self.f_bins = (1-alpha)*self.f_bins + alpha*(new_fs)
 
 
         if self.training:
-            alpha = 0.9
-            self.bins = (1-alpha)*self.bins + alpha*(new_bins)
             r = self.conv2d_forward(x,self.weight)
             return r
         else:
-            new_weight = torch.matmul(self.selected_encoding,self.bins)
-            new_weight = new_weight.reshape(self.weight.size())
-            i = self.conv2d_forward(x,new_weight)
+            i = self.conv2d_forward(x,self.weight_hashed)
             return i
-
-
 
 
 class AlexNet(nn.Module):
@@ -160,13 +188,6 @@ def get_loss(labels,preds,model):
     ce = nn.CrossEntropyLoss(reduction="mean")
     l1 = ce(preds,labels)
 
-    # layers = [ "conv1","conv2","conv3","conv4","conv5" ]
-    # entropy_loss = 0
-    # for layer in layers:
-    #     model_layer = getattr(model,layer)
-    #     entropy_loss += Categorical(probs = model_layer.bins).entropy().sum()
-
-    # l = l1 + entropy_loss
     return l1
 
 
@@ -209,7 +230,7 @@ if __name__ == "__main__":
             print(f"loss:{loss}")
 
 
-        if epoch%2==0:
+        if epoch%1==0:
             # torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
 
             test_acc = evaluate(model,testloader,cuda = CUDA)

@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.linear_model import SGDRegressor
 
 def get_binary_encodings(n):
     ans = []
@@ -12,6 +13,8 @@ def get_binary_encodings(n):
                 tans[j]=1
         ans.append(tans)
     return ans
+
+# def
 
 if __name__ == "__main__":
     l = np.array(get_binary_encodings(8))
