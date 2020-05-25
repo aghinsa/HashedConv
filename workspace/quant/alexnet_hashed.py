@@ -53,7 +53,7 @@ class HashedConv(nn.Conv2d):
         self.all_encodings = self.all_encodings.float().cuda()
 
         self.sgd = SGDRegressor(max_iter=100, tol=1e-3,warm_start=True)
-        self.selected_encoding = None
+        self.weight_hashed = self.weight.clone().detach()
 
     def forward(self,x):
 
@@ -82,7 +82,7 @@ class HashedConv(nn.Conv2d):
                         quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
 
                         w = torch.abs( w - quant_levels.t()) # [m,2^nb]
-                        
+
                         idx = torch.argmin(w,dim = -1)
 
                         selected_encoding = self.all_encodings[idx] #[m,nbins]
@@ -101,16 +101,13 @@ class HashedConv(nn.Conv2d):
                             # new_fs.append(f_new_bin)
 
                             s = selected_encoding #[m,nb]
-                            # st = selected_encoding.t() #[nb,m]
-                            # f_new_bin = torch.matmul(st,s) #[nb,nb]
-                            # f_new_bin = torch.inverse(f_new_bin)
                             psued_inv = torch.pinverse(s)
                             f_new_bin = torch.matmul(psued_inv,wx.reshape(-1,1)) #[nb,1]
                             new_fs.append(f_new_bin.t())
 
                     new_fs = torch.cat(new_fs,axis=0)
-                    alpha = 0.9
-                    self.f_bins = (1-alpha)*self.f_bins + alpha*(new_fs)
+                    decay = 0.9
+                    self.f_bins -= (1 - decay) * (self.f_bins - new_fs)
 
                 weight_hashed = torch.cat(new_ws,axis=0)
                 self.weight_hashed = weight_hashed
@@ -120,7 +117,6 @@ class HashedConv(nn.Conv2d):
             r = self.conv2d_forward(x,self.weight)
             return r
         else:
-            print("fml")
             i = self.conv2d_forward(x,self.weight_hashed)
             return i
 
@@ -196,9 +192,9 @@ def get_loss(labels,preds,model):
 
 if __name__ == "__main__":
     trainloader,testloader = cifar10_loader(batch_size=128,data_path="../data")
-    CUDA =True
 
-    model = AlexNet().cuda()
+    model = AlexNet()
+    model.cuda()
     layers = [ "conv1","conv2","conv3","conv4","conv5" ]
 
 
@@ -212,9 +208,8 @@ if __name__ == "__main__":
         for i, data in enumerate(trainloader, 0):
             inputs, labels = data
 
-            if CUDA:
-                inputs = inputs.cuda()
-                labels = labels.cuda()
+            inputs = inputs.cuda()
+            labels = labels.cuda()
 
 
             optimizer.zero_grad()
@@ -234,16 +229,16 @@ if __name__ == "__main__":
 
         if epoch%1==0:
             # torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
-
-            test_acc = evaluate(model,testloader,cuda = CUDA)
-            train_acc = evaluate(model,trainloader,cuda = CUDA)
+            trl,tsl = cifar10_loader(batch_size=1024,data_path="../data")
+            test_acc = evaluate(model,tsl,cuda = True)
+            train_acc = evaluate(model,trl,cuda = True)
             print(f"Epoch {epoch} complete:")
             print(f"\ttest Accuracy : {test_acc}")
             print(f"\ttrain Accuracy : {train_acc}")
 
             model.eval()
-            test_acc = evaluate(model,testloader,cuda = CUDA)
-            train_acc = evaluate(model,trainloader,cuda = CUDA)
+            test_acc = evaluate(model,tsl,cuda = True)
+            train_acc = evaluate(model,trl,cuda = True)
             print(f"\teval_test Accuracy : {test_acc}")
             print(f"\teval_train Accuracy : {train_acc}")
             model.train()
