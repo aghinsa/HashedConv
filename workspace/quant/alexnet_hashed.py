@@ -14,6 +14,9 @@ from torch.utils.tensorboard import SummaryWriter
 from alexnet import AlexNet as AlexNetNoHash
 from utils import evaluate,cifar10_loader,get_weight_bins
 from torch.distributions import Categorical
+from sklearn.linear_model import SGDRegressor
+
+from quant_utils import get_binary_encodings
 
 BATCH_SIZE = 2048
 N_EPOCHS = 1000
@@ -23,27 +26,72 @@ CUDA = True
 
 TAU = .01
 
-N_BINS = 8
+def init_by_power(n):
+    l = []
+    p = 1
+    for i in range(n):
+        l.append(p)
+        p*=2
+    l = np.array(l).reshape(-1,1)
+    l = torch.from_numpy(l).float()
+    return l
 
 class HashedConv(nn.Conv2d):
-    def binary_init(self,size):
-        w = np.random.choice([-1,1],size)
-        return torch.from_numpy(w).float()
 
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
-        self.n_bins = N_BINS
-        self.bins = nn.Parameter(torch.randn(self.n_bins,1))
-        self.og_weight_size = self.weight.size()
-        w_size = self.og_weight_size + (self.n_bins,)
-        self.weight = nn.Parameter( self.binary_init(w_size) )
+        self.n_bins = 4
+
+        # self.bins = init_by_power(self.n_bins).cuda()
+        self.bins = (torch.rand(self.n_bins,1)).cuda()
+
+
+        self.all_encodings = np.array(get_binary_encodings(self.n_bins))
+        self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bins,n_bins]
+        self.all_encodings = self.all_encodings.float().cuda()
+
+        self.sgd = SGDRegressor(max_iter=1000, tol=1e-3,warm_start=True)
+        self.selected_encoding = None
 
     def forward(self,x):
-        # constructing probability matrix
-        # prob = self.weight.clone().detach().view(-1,1) # [M,1]
-        weight = torch.matmul(self.weight,torch.exp(self.bins)).squeeze()
-        out = self.conv2d_forward(x,weight)
-        return out
+
+        with torch.no_grad():
+            w = self.weight.clone()
+            w = w.reshape(-1,1)
+            wr = w
+            for _ in range(10):
+                quant_levels = torch.matmul(self.all_encodings, self.bins) # [2^nb,1]
+                w = torch.pow( w - quant_levels.t() ,2) # [m,2^nb]
+                idx = torch.argmin(w,dim = -1)
+                selected_encoding = self.all_encodings[idx]
+
+                print(f"s : {selected_encoding.size()}")
+
+                # self.sgd.fit(selected_encoding.cpu(),wr.cpu().view(-1))
+                # new_bins = self.sgd.coef_
+                # new_bins = torch.from_numpy(new_bins).reshape(-1,1).float().cuda()
+
+                # updating bins
+                s = selected_encoding #[m,nb]
+
+                st = s.t() #[nb,m]
+                new_bins = torch.matmul(st,s) #[nb,nb]
+                new_bins = torch.inverse(new_bins)
+                new_bins = torch.matmul(new_bins,st) # [nb,m]
+                new_bins = torch.matmul(new_bins,wr) #[nb,1]
+
+
+        if self.training:
+            alpha = 0.9
+            self.bins = (1-alpha)*self.bins + alpha*(new_bins)
+            r = self.conv2d_forward(x,self.weight)
+            return r
+        else:
+            new_weight = torch.matmul(self.selected_encoding,self.bins)
+            new_weight = new_weight.reshape(self.weight.size())
+            i = self.conv2d_forward(x,new_weight)
+            return i
+
 
 
 
@@ -112,28 +160,19 @@ def get_loss(labels,preds,model):
     ce = nn.CrossEntropyLoss(reduction="mean")
     l1 = ce(preds,labels)
 
-    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
-    entropy_loss = 0
-    for layer in layers:
-        model_layer = getattr(model,layer)
-        entropy_loss += Categorical(probs = model_layer.bins).entropy().sum()
+    # layers = [ "conv1","conv2","conv3","conv4","conv5" ]
+    # entropy_loss = 0
+    # for layer in layers:
+    #     model_layer = getattr(model,layer)
+    #     entropy_loss += Categorical(probs = model_layer.bins).entropy().sum()
 
-    return l1 + entropy_loss
-
-
-
-class WeightBinarizer(object):
+    # l = l1 + entropy_loss
+    return l1
 
 
-    def __call__(self, module):
-        # filter the variables to get the ones you want
-        if type(module) == nn.Conv2d:
-            w = module.weight.data
-            w = torch.where(w>0,1,-1)
-            module.weight = nn.Parameter(w)
 
 if __name__ == "__main__":
-    trainloader,testloader = cifar10_loader(batch_size=64,data_path="../data")
+    trainloader,testloader = cifar10_loader(batch_size=128,data_path="../data")
     CUDA =True
 
     model = AlexNet().cuda()
@@ -141,7 +180,6 @@ if __name__ == "__main__":
 
 
     optimizer = torch.optim.Adam(model.parameters())
-    binarizer = WeightBinarizer()
     writer = SummaryWriter()
 
     global_step = 0
@@ -164,24 +202,27 @@ if __name__ == "__main__":
             loss= get_loss(labels,preds,model)
             loss.backward()
             optimizer.step()
-            model.apply(binarizer)
+            # model.apply(binarizer)
             writer.add_scalar('loss/train', loss , global_step)
 
             global_step+=1
             print(f"loss:{loss}")
 
 
-        if epoch%10==0:
-            torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+        if epoch%2==0:
+            # torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
 
+            test_acc = evaluate(model,testloader,cuda = CUDA)
+            train_acc = evaluate(model,trainloader,cuda = CUDA)
+            print(f"Epoch {epoch} complete:")
+            print(f"\ttest Accuracy : {test_acc}")
+            print(f"\ttrain Accuracy : {train_acc}")
 
             model.eval()
             test_acc = evaluate(model,testloader,cuda = CUDA)
             train_acc = evaluate(model,trainloader,cuda = CUDA)
-
-            print(f"Epoch {epoch} complete:")
-            print(f"\ttest Accuracy : {test_acc}")
-            print(f"\ttrain Accuracy : {train_acc}")
+            print(f"\teval_test Accuracy : {test_acc}")
+            print(f"\teval_train Accuracy : {train_acc}")
             model.train()
 
     print('Finished Training')
