@@ -80,22 +80,18 @@ class AlexNet(nn.Module):
                         nn.ReLU(inplace=True),
                 nn.MaxPool2d(kernel_size=2),
             )
-        self.bn1 = nn.BatchNorm2d(64)
 
         self.conv2 = HashedConv(64, 192, kernel_size=3, padding=1,)
         self.ops2 = nn.Sequential(
                         nn.ReLU(inplace=True),
                 nn.MaxPool2d(kernel_size=2),
             )
-        self.bn2 = nn.BatchNorm2d(192)
 
         self.conv3 = HashedConv(192, 384, kernel_size=3, padding=1,)
         self.ops3 = nn.ReLU(inplace=True)
-        self.bn3 = nn.BatchNorm2d(384)
 
         self.conv4 = HashedConv(384, 256, kernel_size=3, padding=1,)
         self.ops4 = nn.ReLU(inplace=True)
-        self.bn4 = nn.BatchNorm2d(256)
 
         self.conv5 = HashedConv(256, 256, kernel_size=3, padding=1,)
         self.ops5 = nn.Sequential(
@@ -126,6 +122,8 @@ class AlexNet(nn.Module):
             curr.bins = nn.Parameter(torch.from_numpy(bins).cuda())
             curr.centroids = torch.from_numpy(bins).cuda()
             curr.weight = nn.Parameter(trained_weight)
+            curr.new_weight = nn.Parameter(trained_weight)
+
 
     def forward(self, x):
         x= self.conv1(x)
@@ -147,14 +145,32 @@ class AlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
-    def pretrain_hash(self,pretrained_model,trainloader,pretraining_epoch=100):
+    def pretrain_hash(self,pretrained_model,dataloader,pretraining_epoch=100):
         optimizer = torch.optim.Adam(self.parameters())
         print("Pretraining...")
+        mse_fn = nn.MSELoss(reduction = "mean")
+        conv_ops = [ (f"conv{x}",f"ops{x}") for x in range(1,6)]
+
         for epoch in range(pretraining_epoch):
+            loss = 0
+            ## calculating loss for intermediatory conv ouputs
+            for inputs,labels in dataloader:
+                r = inputs.cuda()
+
+                for c,o in conv_ops:
+                    r = getattr(pretrained_model,c)(r)
+                    i = getattr(self,c)(r)
+                    loss += mse_fn(r,i)
+                    r = getattr(pretrained_model,o)(r)
+
+
             optimizer.zero_grad()
             loss = get_model_hashed_weight_loss(self,pretrained_model)
             loss.backward()
             optimizer.step()
+
+
+
             print(f"{epoch}: {loss}")
         print("pretrain complete")
         # torch.save(self.state_dict(), f"./pretrained_hash_vals")
@@ -222,9 +238,11 @@ if __name__ == "__main__":
 
     model.custom_init(pretrained_model,n_bins=16)
 
-    # if CUDA:
-    #     model.cuda()
-    #     pretrained_model.cuda()
+    if CUDA:
+        model.cuda()
+        pretrained_model.cuda()
+
+    model.pretrain_hash(pretrained_model,trainloader,pretraining_epoch=100)
 
 
     # optimizer = torch.optim.Adam(model.parameters())
