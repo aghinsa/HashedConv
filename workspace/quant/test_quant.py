@@ -3,6 +3,7 @@ import unittest
 import torch.nn as nn
 
 from alexnet import AlexNet
+from base import LayerData
 from quantizer import get_layers_path,getattr_by_path_list
 
 class FakeModel(nn.Module):
@@ -56,6 +57,11 @@ class TestAttributeGetter(unittest.TestCase):
         )
 
 
+class TestLayerData(unittest.TestCase):
+    def test_naming(self):
+        qual_path = [['classifier'], 4]
+        l = LayerData(qual_path)
+        self.assertEqual(l.layer_name,"classifier.4")
 
 
 if __name__ == "__main__":
