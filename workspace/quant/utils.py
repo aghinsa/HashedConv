@@ -3,9 +3,7 @@ import numpy as np
 import torchvision
 import torchvision.transforms as transforms
 
-from collections import namedtuple
 
-TestData = namedtuple("TestData",["train_acc","test_acc","hashed_train_acc","hashed_test_accuracy"])
 
 def evaluate(model,loader,cuda):
     correct = 0

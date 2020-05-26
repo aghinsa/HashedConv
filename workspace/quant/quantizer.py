@@ -137,11 +137,12 @@ def get_layers_path(model,avoid = []):
 
 class BitQuantizer:
 
-    def __init__(self,model,n_fs,n_bits,layers_qual_path=None,avoid=[]):
+    def __init__(self,model,n_fs,n_bits,layers_qual_path=None,avoid=[],verbose=2):
         self.model = model
         self.n_fs = n_fs
         self.n_bits = n_bits
         self.layers_qual_path = layers_qual_path
+        self.verbose = verbose
 
         if self.layers_qual_path is None:
             self.layers_qual_path = get_layers_path(model,avoid = avoid)
@@ -158,7 +159,8 @@ class BitQuantizer:
             self.layer_datas.append(layer_data)
 
 
-        print(f"Layers detected : {[x.layer_name for x in self.layer_datas ]}")
+        if self.verbose == 2:
+            print(f"Layers detected : {[x.layer_name for x in self.layer_datas ]}")
 
         self.all_encodings = self.get_binary_encodings(self.n_bits)
         self.all_encodings = torch.from_numpy(self.all_encodings).float().cuda()
@@ -223,7 +225,8 @@ class BitQuantizer:
 
         with torch.no_grad():
             with torch.cuda.device("cuda"):
-                for _ in tqdm(range(n_iter)):
+                disable_tqdm = (self.verbose < 2)
+                for _ in tqdm(range(n_iter),disable=disable_tqdm):
                     channel_step = layer_data.n_out//layer_data.n_fs
 
                     new_fs = []
@@ -277,13 +280,16 @@ class BitQuantizer:
 
     def train_hash_functions(self,n_iter):
         for layer_data in self.layer_datas:
-            print(f"hashing layer: {layer_data.layer_name}")
+            if self.verbose == 1:
+                print(f"Hashing layer: {layer_data.layer_name}")
             self.train_hash_functions_for_layer(layer_data,n_iter)
+            if self.verbose == 1:
+                print()
 
     def get_hashed_model(self):
         model = copy.deepcopy(self.model)
-
-        for layer_data in tqdm(self.layer_datas):
+        disable_tqdm = self.verbose < 1
+        for layer_data in tqdm(self.layer_datas,disable = disable_tqdm):
             getattr_by_path_list(model,layer_data.qual_path).weight = nn.Parameter(layer_data.hashed_weight)
         return model
 

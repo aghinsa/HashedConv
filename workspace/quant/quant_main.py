@@ -21,7 +21,6 @@ trainloader,testloader = cifar10_loader(256,"../data")
 model.cuda()
 
 
-
 n_fs = 32
 n_bits = 6
 n_iter = 50
