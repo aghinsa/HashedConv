@@ -16,6 +16,7 @@ class LayerData:
         self.w = None
         self.n_out = None
         self.hashed_weight = None
+        self.n_fs = None
 
         f = lambda L: '.'.join([f(x) if type(x) is list else x for x in L])
         self.layer_name = f([str(x) if isinstance(x,int) else x for x in self.qual_path])

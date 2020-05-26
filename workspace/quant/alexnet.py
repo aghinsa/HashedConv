@@ -9,7 +9,7 @@ import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
-from utils import evaluate,cifar10_loader,get_weight_bins
+from utils import evaluate,cifar10_loader
 
 BATCH_SIZE = 4096
 N_EPOCHS = 50
@@ -87,19 +87,12 @@ def get_loss(labels,preds):
 
 if __name__ == "__main__":
 
-    trainloader,testloader = cifar10_loader(batch_size=512,data_path="../data")
-
-
-    classes = ('plane', 'car', 'bird', 'cat',
-            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
-
+    trainloader,testloader = cifar10_loader(batch_size=4096,data_path="../data")
     CUDA =True
-
     model = AlexNet()
 
     if LOAD_CKPT is not None:
-        LOAD_CKPT = f"./checkpoint/model_{LOAD_CKPT}"
+        LOAD_CKPT = f"./checkpoint/alexnet_{LOAD_CKPT}"
         model.load_state_dict(torch.load(LOAD_CKPT))
 
     if CUDA:
@@ -113,7 +106,6 @@ if __name__ == "__main__":
 
         for i, data in enumerate(trainloader, 0):
             inputs, labels = data
-            print(f"size : {inputs.size()}")
 
             if CUDA:
                 inputs = inputs.cuda()

@@ -3,6 +3,10 @@ import numpy as np
 import torchvision
 import torchvision.transforms as transforms
 
+from collections import namedtuple
+
+TestData = namedtuple("TestData",["train_acc","test_acc","hashed_train_acc","hashed_test_accuracy"])
+
 def evaluate(model,loader,cuda):
     correct = 0
     total = 0
@@ -35,6 +39,4 @@ def cifar10_loader(batch_size=512,data_path="./data"):
     return trainloader,testloader
 
 
-def get_weight_bins(arr,n_bins):
-    hist,bin_edges = np.histogram(arr, bins=n_bins-1)
-    return bin_edges
+

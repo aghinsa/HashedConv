@@ -113,28 +113,25 @@ def get_layers_path(model,avoid = []):
             if t_name in avoid:
                 continue
 
-            qual_path = []
+            qual_path = [ int(x) if x.isnumeric() else x for x in qual_name]
 
-            has_integer = False
-            for x in qual_name:
-                if x.isnumeric():
-                    has_integer = True
-                    x = int(x)
-                qual_path.append(x)
-
-            # if there are no integers then the path points directly to a layer
-            if has_integer:
-                new_qual_path = []
+            # splitting list on integers
+            new_qual_path = []
+            while(qual_path):
                 t_path = []
-                for x in qual_path:
+                while(qual_path):
+                    x = qual_path.pop(0)
                     if isinstance(x,int):
-                        new_qual_path.append(t_path)
-                        new_qual_path.append(x)
-                        t_path = []
-                        continue
-                    t_path.append(x)
-            else:
-                new_qual_path = [qual_path]
+                        if t_path:
+                            new_qual_path.append(t_path)
+                            t_path=[]
+                            new_qual_path.append(x)
+                            break
+                    else:
+                        t_path.append(x)
+                if t_path:
+                    new_qual_path.append(t_path)
+
             all_paths.append(new_qual_path)
     return all_paths
 
@@ -149,12 +146,19 @@ class BitQuantizer:
         if self.layers_qual_path is None:
             self.layers_qual_path = get_layers_path(model,avoid = avoid)
 
-
         self.layer_datas = []
-        for i,layer_path in enumerate(self.layers_qual_path):
+        for layer_number,layer_path in enumerate(self.layers_qual_path):
             layer_data = LayerData(qual_path=layer_path)
+            model_layer = getattr_by_path_list(self.model,layer_path)
+
+            if not(isinstance(model_layer,nn.Conv2d) or isinstance(model_layer,nn.Linear)):
+                continue
+
             layer_data.get_layer = partial(getattr_by_path_list,self.model,layer_path)
             self.layer_datas.append(layer_data)
+
+
+        print(f"Layers detected : {[x.layer_name for x in self.layer_datas ]}")
 
         self.all_encodings = self.get_binary_encodings(self.n_bits)
         self.all_encodings = torch.from_numpy(self.all_encodings).float().cuda()
@@ -187,7 +191,9 @@ class BitQuantizer:
         for layer_data in self.layer_datas:
             w = layer_data.get_layer().weight.data
             coefs = self._init_hashed_coefs(w.cpu(),self.n_bits)
-            layer_data.fs = torch.from_numpy(np.repeat(coefs.reshape(1,-1),self.n_fs,axis=0)).cuda()
+            layer_n_fs = min(self.n_fs,w.size()[0])
+            layer_data.fs = torch.from_numpy(np.repeat(coefs.reshape(1,-1),layer_n_fs,axis=0)).cuda()
+            layer_data.n_fs = layer_n_fs
             layer_data.w = w
             layer_data.n_out = w.size()[0]
 
@@ -218,16 +224,16 @@ class BitQuantizer:
         with torch.no_grad():
             with torch.cuda.device("cuda"):
                 for _ in tqdm(range(n_iter)):
-                    channel_step = layer_data.n_out//self.n_fs
+                    channel_step = layer_data.n_out//layer_data.n_fs
 
                     new_fs = []
                     new_ws = []
 
-                    for fidx in range(0,self.n_fs):
+                    for fidx in range(0,layer_data.n_fs):
                         # select hash functions for the channel batch
                         f = layer_data.fs[fidx].reshape(-1,1) #[nb,1]
 
-                        if fidx != self.n_fs-1:
+                        if fidx != layer_data.n_fs-1:
                             wx = w_master[fidx*channel_step:(fidx+1)*channel_step ] # [channel_step,inc,k,k]
                         else:
                             wx = w_master[fidx*channel_step:] # [channel_step,inc,k,k]
@@ -277,7 +283,7 @@ class BitQuantizer:
     def get_hashed_model(self):
         model = copy.deepcopy(self.model)
 
-        for layer_data in self.layer_datas:
+        for layer_data in tqdm(self.layer_datas):
             getattr_by_path_list(model,layer_data.qual_path).weight = nn.Parameter(layer_data.hashed_weight)
         return model
 
