@@ -237,6 +237,10 @@ class BitQuantizer:
                         quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
 
                         w = torch.abs( w - quant_levels.t()) # [m,2^nb]
+
+                        if(w.size()[0] == 0):
+                            raise Exception(f"Difference between quant_levels and weight is of shape {w.size()}."
+                                        +" Pease verify that final layers are not quantized.")
                         idx = torch.argmin(w,dim = -1)
 
                         selected_encoding = self.all_encodings[idx] #[m,nbins]
