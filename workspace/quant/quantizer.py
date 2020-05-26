@@ -176,7 +176,7 @@ class BitQuantizer:
         hist,bin_edges = np.histogram(w,bins=bins,density = True)
         vals = list(zip(hist,bin_edges[1:]))
         vals.sort(key = lambda x:x[0],reverse=True)
-        vals = [ x[1] for x in vals[:6]  ]
+        vals = [ x[1] for x in vals[:n]  ]
         return np.array(vals).reshape(-1,1)
 
     def init_hash_functions(self):
@@ -265,7 +265,7 @@ class BitQuantizer:
         # setattr(self,layer_name,layer_data)
         return
 
-    def train_hash_functions(self,n_iter = 100):
+    def train_hash_functions(self,n_iter):
         for layer_data in self.layer_datas:
             print(f"hashing layer: {layer_data.layer_name}")
             self.train_hash_functions_for_layer(layer_data,n_iter)

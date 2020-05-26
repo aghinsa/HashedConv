@@ -4,7 +4,7 @@ import torch.nn as nn
 
 from alexnet import AlexNet
 from base import LayerData
-from quantizer import get_layers_path,getattr_by_path_list
+from quantizer import get_layers_path,getattr_by_path_list,BitQuantizer
 
 class FakeModel(nn.Module):
     def __init__(self):
@@ -12,10 +12,10 @@ class FakeModel(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, )
         self.classifier = nn.Sequential(
 			nn.Dropout(),
-			nn.Linear(256 * 2 * 2, 4096),
+			nn.Linear(100, 1000),
 			nn.ReLU(inplace=True),
 			nn.Dropout(),
-			nn.Linear(4096, 4096),
+			nn.Linear(1000, 10),
 
 		)
 
@@ -63,6 +63,24 @@ class TestLayerData(unittest.TestCase):
         l = LayerData(qual_path)
         self.assertEqual(l.layer_name,"classifier.4")
 
+class TestQuantizer(unittest.TestCase):
+    def test_quantizer(self):
+        n_fs = 8
+        n_bits = 4
+        model = FakeModel()
+        avoid = []
+        n_iter = 10
+        model.cuda()
+        bit_quantizer = BitQuantizer(
+                    model,
+                    n_fs,
+                    n_bits,
+                    avoid=[]
+             )
+
+        bit_quantizer.train_hash_functions(n_iter = n_iter)
+        hashed_model = bit_quantizer.get_hashed_model()
+        return
 
 if __name__ == "__main__":
     unittest.main()
