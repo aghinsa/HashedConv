@@ -40,26 +40,28 @@ class HashedConv(nn.Conv2d):
 
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
-        self.n_bins = 4
-        self.n_fs = 16
-        # self.w.size (outc,inc,k,k)
+        self.n_bins = 6
+        self.n_fs = 64
+
+        # w size (outc,inc,k,k)
+
         self.n_out = self.weight.size()[0]
         self.n_fs = min(self.n_fs,self.n_out)
         self.f_bins = torch.rand(self.n_fs,self.n_bins,).cuda()
-
 
         self.all_encodings = np.array(get_binary_encodings(self.n_bins))
         self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bins,n_bins]
         self.all_encodings = self.all_encodings.float().cuda()
 
         self.sgd = SGDRegressor(max_iter=100, tol=1e-3,warm_start=True)
-        self.weight_hashed = self.weight.clone().detach()
+        self.weight_hashed = self.weight.data
 
     def forward(self,x):
 
         # Calculating function coefficients
         with torch.no_grad():
-            w_master = self.weight.clone().detach()
+
+            w_master = self.weight.data.detach()
 
             # Optimizing hashed weights
             if self.training:
@@ -114,10 +116,11 @@ class HashedConv(nn.Conv2d):
 
 
         if self.training:
-            r = self.conv2d_forward(x,self.weight)
+            r = self.conv2d_forward(x,self.weight) + self.bias.unsqueeze(1).unsqueeze(1)
             return r
         else:
-            i = self.conv2d_forward(x,self.weight_hashed)
+            i = self.conv2d_forward(x,self.weight_hashed) + self.bias.unsqueeze(1).unsqueeze(1)
+
             return i
 
 
@@ -195,8 +198,6 @@ if __name__ == "__main__":
 
     model = AlexNet()
     model.cuda()
-    layers = [ "conv1","conv2","conv3","conv4","conv5" ]
-
 
     optimizer = torch.optim.Adam(model.parameters())
     writer = SummaryWriter()
@@ -220,7 +221,6 @@ if __name__ == "__main__":
             loss= get_loss(labels,preds,model)
             loss.backward()
             optimizer.step()
-            # model.apply(binarizer)
             writer.add_scalar('loss/train', loss , global_step)
 
             global_step+=1
@@ -229,7 +229,7 @@ if __name__ == "__main__":
 
         if epoch%1==0:
             # torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
-            trl,tsl = cifar10_loader(batch_size=1024,data_path="../data")
+            trl,tsl = cifar10_loader(batch_size=4096,data_path="../data")
             test_acc = evaluate(model,tsl,cuda = True)
             train_acc = evaluate(model,trl,cuda = True)
             print(f"Epoch {epoch} complete:")
@@ -242,5 +242,9 @@ if __name__ == "__main__":
             print(f"\teval_test Accuracy : {test_acc}")
             print(f"\teval_train Accuracy : {train_acc}")
             model.train()
+        
+        if epoch%5 == 0:
+            torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+
 
     print('Finished Training')
