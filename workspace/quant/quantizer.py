@@ -1,5 +1,6 @@
 import copy
 import torch
+import types
 import inspect
 import numpy as np
 import torch.nn as nn
@@ -430,6 +431,39 @@ def use_hashed_conv(model):
         setattr_by_path_list(model,layer_path,hashed_conv)
     return model
 
+
+def quantize_model_instance(model):
+    model = use_hashed_conv(model)
+
+    layer_paths = get_layers_path(model,avoid = [])
+    layers = [getattr_by_path_list(model,layer_path) for layer_path in layer_paths ]
+
+    conv_layers = [
+        layer for layer in layers if isinstance(layer,QuantConv2d)
+    ]
+
+    def get_hash_loss(self):
+        loss = 0
+        for layer in conv_layers:
+            loss += layer.hash_loss
+        return loss
+
+    model.get_hash_loss = types.MethodType(get_hash_loss,model)
+    return model
+
+
+def quantizeModel(model_def):
+    if isinstance(model_def,nn.Module):
+        return quantize_model_instance(model_def)
+
+    if inspect.isclass(model_def):
+        class QuantizedModelDef:
+            def __new__(cls,*args,**kwargs):
+                model = model_def(*args,**kwargs)
+                model = quantize_model_instance(model)
+                return model
+
+        return QuantizedModelDef
 
 
 
