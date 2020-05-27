@@ -23,13 +23,13 @@ def get_loss(labels,preds,model):
 
 
 if __name__ == "__main__":
-    batch_size = 256
-    n_epochs = 10
+    batch_size = 128
+    n_epochs = 1
 
     trainloader,testloader = cifar10_loader(batch_size = batch_size,data_path="../data")
 
     model = resnet32()
-    model = quantizeModel(n_bits=2,n_functions=64)(model)
+    model = quantizeModel(n_bits=6,n_functions=64)(model)
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters())
@@ -37,55 +37,77 @@ if __name__ == "__main__":
 
     global_step = 0
 
-    for epoch in range(1,n_epochs+1):
-
-        for i, data in enumerate(trainloader, 0):
-            inputs, labels = data
-
-            inputs = inputs.cuda()
-            labels = labels.cuda()
 
 
-            optimizer.zero_grad()
+    # for epoch in range(1,n_epochs+1):
 
-            preds = model(inputs)
-            _,logits = torch.max(preds,1)
+    #     for i, data in enumerate(trainloader, 0):
+    #         inputs, labels = data
 
-            loss = get_loss(labels,preds,model) + model.get_hash_loss()
-            loss.backward()
-            optimizer.step()
-            writer.add_scalar('loss/train', loss , global_step)
-
-            global_step+=1
-            print(f"loss:{loss}")
+    #         inputs = inputs.cuda()
+    #         labels = labels.cuda()
 
 
-        if epoch%1==0:
-            # torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
-            trl,tsl = cifar10_loader(batch_size=4096,data_path="../data")
-            test_acc = evaluate(model,tsl,cuda = True)
-            train_acc = evaluate(model,trl,cuda = True)
+    #         optimizer.zero_grad()
 
-            writer.add_scalar('train_accuracy/normal', train_acc , epoch)
-            writer.add_scalar('test_accuracy/normal', test_acc , epoch)
+    #         preds = model(inputs)
+    #         _,logits = torch.max(preds,1)
 
+    #         loss = get_loss(labels,preds,model) + model.get_hash_loss()
+    #         loss.backward()
+    #         optimizer.step()
+    #         writer.add_scalar('loss/train', loss , global_step)
 
-            print(f"Epoch {epoch} complete:")
-            print(f"\ttest Accuracy : {test_acc}")
-            print(f"\ttrain Accuracy : {train_acc}")
-
-            model.eval()
-            test_acc = evaluate(model,tsl,cuda = True)
-            train_acc = evaluate(model,trl,cuda = True)
-            print(f"\teval_test Accuracy : {test_acc}")
-            print(f"\teval_train Accuracy : {train_acc}")
-            model.train()
-
-            writer.add_scalar('train_accuracy/hashed', train_acc , epoch)
-            writer.add_scalar('test_accuracy/hashed', test_acc , epoch)
-
-        # if epoch%5 == 0:
-        #     torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+    #         global_step+=1
+    #         print(f"loss:{loss}")
 
 
-    print('Finished Training')
+    #     if epoch%1==0:
+    #         # torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+    #         trl,tsl = cifar10_loader(batch_size=4096,data_path="../data")
+    #         test_acc = evaluate(model,tsl,cuda = True)
+    #         train_acc = evaluate(model,trl,cuda = True)
+
+    #         writer.add_scalar('train_accuracy/normal', train_acc , epoch)
+    #         writer.add_scalar('test_accuracy/normal', test_acc , epoch)
+
+
+    #         print(f"Epoch {epoch} complete:")
+    #         print(f"\ttest Accuracy : {test_acc}")
+    #         print(f"\ttrain Accuracy : {train_acc}")
+
+    #         model.eval()
+    #         test_acc = evaluate(model,tsl,cuda = True)
+    #         train_acc = evaluate(model,trl,cuda = True)
+    #         print(f"\teval_test Accuracy : {test_acc}")
+    #         print(f"\teval_train Accuracy : {train_acc}")
+    #         model.train()
+
+    #         writer.add_scalar('train_accuracy/hashed', train_acc , epoch)
+    #         writer.add_scalar('test_accuracy/hashed', test_acc , epoch)
+
+
+    #     # if epoch%5 == 0:
+    #     #     torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+
+    # model.save_quantization_params("resnet_qm")
+    # print('Finished Training')
+
+
+    model.load_quantization_params("resnet_qm.npz")
+
+    trl,tsl = cifar10_loader(batch_size=4096,data_path="../data")
+    test_acc = evaluate(model,tsl,cuda = True)
+    train_acc = evaluate(model,trl,cuda = True)
+
+
+
+    print(f"\ttest Accuracy : {test_acc}")
+    print(f"\ttrain Accuracy : {train_acc}")
+
+    model.eval()
+    test_acc = evaluate(model,tsl,cuda = True)
+    train_acc = evaluate(model,trl,cuda = True)
+    print(f"\teval_test Accuracy : {test_acc}")
+    print(f"\teval_train Accuracy : {train_acc}")
+    model.train()

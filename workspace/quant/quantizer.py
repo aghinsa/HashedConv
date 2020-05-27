@@ -1,6 +1,7 @@
 import copy
 import torch
 import types
+import pickle
 import inspect
 import numpy as np
 import torch.nn as nn
@@ -455,10 +456,12 @@ class QuantConv2d(nn.Conv2d):
                 wxs_size.append(wx.size())
 
 
-                selected_encoding[selected_encoding==-1] = 0
-                selected_encoding = selected_encoding.cpu().numpy().astype(np.uint8)
+                # selected_encoding[selected_encoding==-1] = 0
+                # selected_encoding = selected_encoding.cpu().numpy().astype(np.uint8)
 
-                packbit = serialize_boolean_array(selected_encoding)
+
+                packbit = selected_encoding
+                # packbit = serialize_boolean_array(selected_encoding)
                 new_encodings.append( packbit )
 
         return{
@@ -470,25 +473,24 @@ class QuantConv2d(nn.Conv2d):
         }
 
     def set_quantization_parameters(self,params):
-        self.f_bins = nn.Parameter(params["functions"])
+        self.f_bins = nn.Parameter(params["functions"].cuda())
         self.n_bits = params["n_bits"]
         new_ws = []
 
         for i in range(self.f_bins.size()[0]):
-            f = self.f_bins[i]
+            f = self.f_bins[i].cuda()
             packbit = params["encodings"][i]
             shape = params["encodings_shape"][i]
 
-            encoding = deserialize_boolean_array(packbit,shape)
-            encoding = encoding.astype(np.float32)
+            # encoding = deserialize_boolean_array(packbit,shape)
+            encoding = packbit.cuda()
 
-            encoding[encoding == 0] = -1
+            # encoding = encoding.astype(np.float32)
+            # encoding[encoding == 0] = -1
 
-            # print(encoding)
 
 
-            encoding = torch.from_numpy(encoding).float()
-            print(encoding.size())
+            # encoding = torch.from_numpy(encoding).float()
             w_size = params["wxs_size"][i]
 
             new_w = torch.matmul(encoding,f).reshape(w_size)
@@ -514,6 +516,7 @@ def use_hashed_conv(model,n_bits=6,n_functions=64):
     ]
 
     hashed_convs = []
+
     # iterating through conv layers and creating kwargs
     conv_attrs = [ param_name for param_name in inspect.signature(nn.Conv2d).parameters ]
     # bias will be later copied from conv layer
@@ -532,11 +535,13 @@ def use_hashed_conv(model,n_bits=6,n_functions=64):
 
         hashed_conv = QuantConv2d(**kwargs)
         hashed_conv.weight = nn.Parameter(copy.deepcopy(layer.weight.clone().detach()))
+
         if layer.bias is not None:
             hashed_conv.bias = nn.Parameter(copy.deepcopy(layer.bias.clone().detach()))
-            hashed_convs.append(hashed_conv)
         else:
             hashed_conv.bias = None
+
+        hashed_convs.append(hashed_conv)
 
     # replacing conv layers with hasehd conv
     for hashed_conv,(_,layer_path) in zip(hashed_convs,conv_layers_with_path):
@@ -551,7 +556,7 @@ def quantize_model_instance(model,n_bits=6,n_functions=64):
     layers = [getattr_by_path_list(model,layer_path) for layer_path in layer_paths ]
 
     conv_layers = [
-        layer for layer in layers if isinstance(layer,QuantConv2d)
+        layer for layer in layers if isinstance(layer,nn.Conv2d)
     ]
 
     def get_hash_loss(self):
@@ -560,7 +565,26 @@ def quantize_model_instance(model,n_bits=6,n_functions=64):
             loss += layer.hash_loss
         return loss
 
+    def save_quantization_params(self,save_path):
+        master_params = []
+        for layer in conv_layers:
+            master_params.append(layer.get_quantization_parameters())
+
+        with open('master_params','wb+') as f:
+            pickle.dump(master_params,f)
+
+    def load_quantization_params(self,save_path):
+        print("loading")
+        with open('master_params','rb') as f:
+            master_params = pickle.load(f)
+        for params,layer in zip(master_params,conv_layers):
+            layer.set_quantization_parameters(params)
+
+
     model.get_hash_loss = types.MethodType(get_hash_loss,model)
+    model.save_quantization_params = types.MethodType(save_quantization_params,model)
+    model.load_quantization_params = types.MethodType(load_quantization_params,model)
+
     return model
 
 def quantizeModel(n_bits=6,n_functions=64):
@@ -575,8 +599,8 @@ def quantizeModel(n_bits=6,n_functions=64):
                     model = model_def(*args,**kwargs)
                     model = quantize_model_instance(model,n_bits,n_functions)
                     return model
-
             return QuantizedModelDef
+
     return _quantizeModel
 
 
