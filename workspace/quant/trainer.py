@@ -90,24 +90,6 @@ if __name__ == "__main__":
     #     # if epoch%5 == 0:
     #     #     torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
 
-    # model.save_quantization_params("resnet_qm")
+    # model.save_quant("resnet_qm")
     # print('Finished Training')
 
-
-    model.load_quantization_params("resnet_qm.npz")
-
-    trl,tsl = cifar10_loader(batch_size=4096,data_path="../data")
-    test_acc = evaluate(model,tsl,cuda = True)
-    train_acc = evaluate(model,trl,cuda = True)
-
-
-
-    print(f"\ttest Accuracy : {test_acc}")
-    print(f"\ttrain Accuracy : {train_acc}")
-
-    model.eval()
-    test_acc = evaluate(model,tsl,cuda = True)
-    train_acc = evaluate(model,trl,cuda = True)
-    print(f"\teval_test Accuracy : {test_acc}")
-    print(f"\teval_train Accuracy : {train_acc}")
-    model.train()

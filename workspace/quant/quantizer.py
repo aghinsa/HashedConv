@@ -377,13 +377,16 @@ class QuantConv2d(nn.Conv2d):
         self.mse = nn.MSELoss(reduction = "mean")
 
 
+
     def forward(self,x):
         if self.training:
             new_fs = []
             new_ws = []
+
             channel_step = self.out_channels//self.n_fs
             w_master = self.weight.data.detach()
             self.hash_loss = 0
+
             for fidx in range(0,self.n_fs):
                 # select hash functions for the channel batch
                 f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
@@ -405,13 +408,16 @@ class QuantConv2d(nn.Conv2d):
 
                     selected_encoding = self.all_encodings[idx] #[m,nbins]
 
+
                 # From the selected encodings generate hash values
                 new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
                 self.hash_loss += self.mse(new_w,wx)
                 new_ws.append(new_w)
 
+
             weight_hashed = torch.cat(new_ws,axis=0)
             self.weight_hashed = weight_hashed
+            self.quant_parameters = quant_parameters
 
             out = self.conv2d_forward(x,self.weight)
             if self.bias is not None:
@@ -423,86 +429,6 @@ class QuantConv2d(nn.Conv2d):
             if self.bias is not None:
                 out+= self.bias.unsqueeze(1).unsqueeze(1)
             return out
-
-    def get_quantization_parameters(self):
-        new_fs = []
-        new_ws = []
-        channel_step = self.out_channels//self.n_fs
-        w_master = self.weight.data.detach()
-        new_encodings = []
-        encodings_size = []
-        wxs_size = []
-
-        for fidx in range(0,self.n_fs):
-            # select hash functions for the channel batch
-            f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
-            with torch.no_grad():
-                if fidx != self.n_fs-1:
-                    wx = w_master[fidx*channel_step:(fidx+1)*channel_step] # [channel_step,inc,k,k]
-                else:
-                    wx = w_master[fidx*channel_step:] # [channel_step,inc,k,k]
-
-                # finding encoding for qhich quant level is closest to w
-                w = wx.reshape(-1,1)
-                quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
-
-                w = torch.abs( w - quant_levels.t()) # [m,2^nb]
-
-                idx = torch.argmin(w,dim = -1)
-
-                selected_encoding = self.all_encodings[idx] #[m,nbins]
-
-                encodings_size.append(selected_encoding.shape)
-                wxs_size.append(wx.size())
-
-
-                # selected_encoding[selected_encoding==-1] = 0
-                # selected_encoding = selected_encoding.cpu().numpy().astype(np.uint8)
-
-
-                packbit = selected_encoding
-                # packbit = serialize_boolean_array(selected_encoding)
-                new_encodings.append( packbit )
-
-        return{
-            "functions" : self.f_bins.cpu(),
-            "encodings" : new_encodings,
-            "wxs_size" : wxs_size,
-            "n_bits" : self.n_bits,
-            "encodings_shape": encodings_size
-        }
-
-    def set_quantization_parameters(self,params):
-        self.f_bins = nn.Parameter(params["functions"].cuda())
-        self.n_bits = params["n_bits"]
-        new_ws = []
-
-        for i in range(self.f_bins.size()[0]):
-            f = self.f_bins[i].cuda()
-            packbit = params["encodings"][i]
-            shape = params["encodings_shape"][i]
-
-            # encoding = deserialize_boolean_array(packbit,shape)
-            encoding = packbit.cuda()
-
-            # encoding = encoding.astype(np.float32)
-            # encoding[encoding == 0] = -1
-
-
-
-            # encoding = torch.from_numpy(encoding).float()
-            w_size = params["wxs_size"][i]
-
-            new_w = torch.matmul(encoding,f).reshape(w_size)
-            new_ws.append(new_w)
-
-        weight_hashed = torch.cat(new_ws,axis=0)
-        weight_hashed = weight_hashed.cuda()
-        self.weight_hashed = weight_hashed
-        self.weight = nn.Parameter(weight_hashed)
-
-        return
-
 
 
 
@@ -565,25 +491,9 @@ def quantize_model_instance(model,n_bits=6,n_functions=64):
             loss += layer.hash_loss
         return loss
 
-    def save_quantization_params(self,save_path):
-        master_params = []
-        for layer in conv_layers:
-            master_params.append(layer.get_quantization_parameters())
-
-        with open('master_params','wb+') as f:
-            pickle.dump(master_params,f)
-
-    def load_quantization_params(self,save_path):
-        print("loading")
-        with open('master_params','rb') as f:
-            master_params = pickle.load(f)
-        for params,layer in zip(master_params,conv_layers):
-            layer.set_quantization_parameters(params)
-
 
     model.get_hash_loss = types.MethodType(get_hash_loss,model)
-    model.save_quantization_params = types.MethodType(save_quantization_params,model)
-    model.load_quantization_params = types.MethodType(load_quantization_params,model)
+
 
     return model
 

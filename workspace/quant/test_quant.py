@@ -141,14 +141,6 @@ class TestQuantConv(unittest.TestCase):
         x = model(x)
         self.assertGreater(float(model.get_hash_loss()),0)
 
-    def test_get_quant_params(self):
-        torch.manual_seed(0)
-        model = FakeQuantModel()
-        model.cuda()
-
-        params = model.conv1.get_quantization_parameters()
-        model.conv1.set_quantization_parameters(params)
-
 
 if __name__ == "__main__":
     unittest.main()
