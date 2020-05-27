@@ -15,22 +15,6 @@ from base import *
 
 import numpy as np
 
-def serialize_boolean_array(array: np.array) -> bytes:
-    """
-    Takes a numpy.array with boolean values and converts it to a space-efficient
-    binary representation.
-    """
-    return np.packbits(array).tobytes()
-
-def deserialize_boolean_array(serialized_array: bytes, shape: tuple) -> np.array:
-    """
-    Inverse of serialize_boolean_array.
-    """
-    num_elements = np.prod(shape)
-    packed_bits = np.frombuffer(serialized_array, dtype='uint8')
-    result = np.unpackbits(packed_bits)[:num_elements]
-    result.shape = shape
-    return result
 
 def get_binary_encodings(n):
     """
@@ -116,6 +100,41 @@ def getattr_by_path_list(obj,path_list):
     return attr
 
 def setattr_by_path_list(obj,input_path_list,val):
+    """
+    Set value of attribute indexed by path list to val
+
+    Parameters:
+        obj : Python object
+        input_path_list : List[List[Union[str,int]]
+        val:Any
+
+    Returns :
+        None
+
+    Eg:
+        ```
+        >>> class FakeModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = nn.Conv2d(3, 64, kernel_size=3, )
+                    self.classifier = nn.Sequential(
+                        nn.Linear(100, 1000),
+                        nn.Linear(1000, 10),
+
+                    )
+        >>> model = FakeModel()
+        >>> model.classifier[0]
+        nn.Linear(100, 1000)
+
+        >>> new_linear = nn.Linear(10, 10)
+        >>> path_list = [['classifier'], 0]
+        >>> setattr_by_path_list(model,path_list , new_linear )
+        >>> model.classifier[0]
+
+        nn.Linear(10,10)
+
+        ```
+    """
     path_list = copy.deepcopy(input_path_list)
     last_path = path_list.pop()
 
@@ -205,8 +224,39 @@ def get_layers_path(model,avoid = []):
     return all_paths
 
 class BitQuantizer:
+    """Class to hash weights of a model to specified number of bins.
 
+    Eg:
+        ```
+        >>> model = resnet32()
+        >>> n_fs = 32
+        >>>  n_bits = 6
+        >>>  n_iter = 50
+        >>>  avoid =[]
+        >>>  bit_quantizer = BitQuantizer(
+                                model,
+                                n_fs,
+                                n_bits,
+                                avoid=avoid
+                        )
+        >>> bit_quantizer.train_hash_functions(n_iter = n_iter)
+        >>> hashed_model = bit_quantizer.get_hashed_model()
+        ```
+    """
     def __init__(self,model,n_fs,n_bits,layers_qual_path=None,avoid=[],verbose=2):
+        """
+        Parameters:
+            - model:torch.model : model to quantize.
+            - n_fs:int : number of functions to use in layer,
+                    minimum of n_fs,number of out channels will be used.
+            - n_bits:int : number of bits per weight
+            - layers_qual_path:List[List[str,int]] : path to layers which should be
+                    quantized,should have weight as an attribute. All convolutional,
+                    linear layers are used if not provided.Default:None.
+            - avoid:List[str] : List of layers to be avoided.Layer name should be dot
+                                seperated path.eg: ["classifier.1.conv1"].Default = [].
+            - verbose:int : one of 0,1,2. 2 being the most detailed.
+        """
         self.model = model
         self.n_fs = n_fs
         self.n_bits = n_bits
@@ -246,7 +296,6 @@ class BitQuantizer:
             n: Top n bins to select
         Returns:
             np.array [n,1]
-
         """
         hist,bin_edges = np.histogram(w,bins=bins,density = True)
         vals = list(zip(hist,bin_edges[1:]))
@@ -269,8 +318,14 @@ class BitQuantizer:
             layer_data.n_out = w.size()[0]
 
     def train_hash_functions_for_layer(self,layer_data,n_iter = 100):
+        """
+        Minimizes hash parameter for layer pointed by layer_data.layer_path
+        Parameters:
+            layer_data:LayerData
+            n_iter:int
+        Returns: None
+        """
         w_master = layer_data.w
-
         with torch.no_grad():
             with torch.cuda.device("cuda"):
                 disable_tqdm = (self.verbose < 2)
@@ -322,10 +377,15 @@ class BitQuantizer:
             hashed_weight = torch.cat(new_ws,axis=0)
             layer_data.hashed_weight = hashed_weight
 
-
         return
 
     def train_hash_functions(self,n_iter):
+        """
+        Trains hash functions for all layers
+
+        Parameters:
+            n_iter:int
+        """
         disable_tqdm = self.verbose < 1
         for layer_data in tqdm(self.layer_datas,disable = disable_tqdm):
 
@@ -337,6 +397,12 @@ class BitQuantizer:
                 print()
 
     def get_hashed_model(self):
+        """
+        Copies hashed weights to the model
+
+        Return:
+            torch.model
+        """
         model = copy.deepcopy(self.model)
         for layer_data in self.layer_datas:
             getattr_by_path_list(model,layer_data.qual_path).weight = nn.Parameter(layer_data.hashed_weight)
@@ -346,8 +412,16 @@ class BitQuantizer:
 
 
 class QuantConv2d(nn.Conv2d):
-
+    """Convolutional layer which uses quantized weights.Can be used in place
+    of nn.Conv2d
+    """
     def __init__(self,*args,**kwargs):
+        """
+        Parameters:
+            - All parameters supported by nn.Conv2d
+            - n_bits:int : number of bits to quantize
+            - n_functions:int :number of functions to use per layer
+        """
         self.n_bits = 6
         self.n_fs = 64
         if "n_bits" in kwargs:
@@ -366,7 +440,7 @@ class QuantConv2d(nn.Conv2d):
 
         self.f_bins = nn.Parameter(torch.rand(self.n_fs,self.n_bits,))
 
-
+        # generate all possible encodings of length n_bits
         self.all_encodings = np.array(get_binary_encodings(self.n_bits))
         self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bits,n_bits]
         self.all_encodings = self.all_encodings.float().cuda()
@@ -376,12 +450,14 @@ class QuantConv2d(nn.Conv2d):
         self.hash_loss = 0
         self.mse = nn.MSELoss(reduction = "mean")
 
+        self.quant_parameters = []
 
 
     def forward(self,x):
         if self.training:
             new_fs = []
             new_ws = []
+            quant_parameters = []
 
             channel_step = self.out_channels//self.n_fs
             w_master = self.weight.data.detach()
@@ -413,6 +489,7 @@ class QuantConv2d(nn.Conv2d):
                 new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
                 self.hash_loss += self.mse(new_w,wx)
                 new_ws.append(new_w)
+                quant_parameters.append( (selected_encoding,f,wx.size()) )
 
 
             weight_hashed = torch.cat(new_ws,axis=0)
@@ -430,9 +507,32 @@ class QuantConv2d(nn.Conv2d):
                 out+= self.bias.unsqueeze(1).unsqueeze(1)
             return out
 
+    def set_quant_parameters(self,quant_parameters):
+        self.quant_parameters = quant_parameters
+
+        ws = []
+        for e,f,s in self.quant_parameters:
+            w = torch.matmul(e,f).reshape(s)
+            ws.append(w)
+
+        weight_hashed = torch.cat(ws,axis=0).cuda()
+        self.weight_hashed = weight_hashed
+        self.weight = nn.Parameter(weight_hashed)
+
 
 
 def use_hashed_conv(model,n_bits=6,n_functions=64):
+    """
+    Replaces Conv2d by QuantConv2d in all children modules
+
+    Parameters:
+        - model:torch model
+        - n_bits:int
+        - n_functions:int
+
+    Returns
+        - torch model
+    """
     layer_paths = get_layers_path(model,avoid = [])
     layers = [getattr_by_path_list(model,layer_path) for layer_path in layer_paths ]
 
@@ -476,6 +576,17 @@ def use_hashed_conv(model,n_bits=6,n_functions=64):
 
 
 def quantize_model_instance(model,n_bits=6,n_functions=64):
+    """
+    Converts torch model to quantized model
+
+    Parameters:
+        - model:torch model
+        - n_bits:int
+        - n_functions:int
+
+    Returns
+        - torch model
+    """
     model = use_hashed_conv(model,n_bits,n_functions)
 
     layer_paths = get_layers_path(model,avoid = [])
@@ -491,14 +602,50 @@ def quantize_model_instance(model,n_bits=6,n_functions=64):
             loss += layer.hash_loss
         return loss
 
+    def copy_hashed_weights(self):
+        for layer in conv_layers:
+            layer.weight = nn.Parameter(layer.weight_hashed)
+        return
 
     model.get_hash_loss = types.MethodType(get_hash_loss,model)
-
+    model.copy_hashed_weights = types.MethodType(copy_hashed_weights,model)
 
     return model
 
 def quantizeModel(n_bits=6,n_functions=64):
+    """
+    Eg:
+        ```
+         >>> @quantizeModel(n_functions = 4,n_bits=2)
+             class FakeModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = nn.Conv2d(3, 64, kernel_size=3, )
+                    self.encoder = nn.Sequential(
+                        nn.Conv2d(64, 64, kernel_size=3, ),
+                        nn.Conv2d(64, 64, kernel_size=3, )
+                    )
+        >>>  model = FakeModel()
+        >>> isinstance(model.encoder[0],QuantConv2d)
+        True
 
+        >>> class FakeModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = nn.Conv2d(3, 64, kernel_size=3, )
+                    self.encoder = nn.Sequential(
+                        nn.Conv2d(64, 64, kernel_size=3, ),
+                        nn.Conv2d(64, 64, kernel_size=3, )
+                    )
+        >>> model = FakeModel()
+        >>> isinstance(model.encoder[0],QuantConv2d)
+        False
+        >>> model = quantizeModel()(model)
+        >>> isinstance(model.encoder[0],QuantConv2d)
+        >>> True
+
+        ```
+    """
     def _quantizeModel(model_def):
         if isinstance(model_def,nn.Module):
             return quantize_model_instance(model_def,n_bits,n_functions)
