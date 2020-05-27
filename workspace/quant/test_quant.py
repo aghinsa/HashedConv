@@ -4,7 +4,7 @@ import torch.nn as nn
 
 from alexnet import AlexNet
 from base import LayerData
-from quantizer import get_layers_path,getattr_by_path_list,BitQuantizer
+from quantizer import get_layers_path,getattr_by_path_list,BitQuantizer,setattr_by_path_list,use_hashed_conv,QuantConv2d
 
 class FakeModel(nn.Module):
     def __init__(self):
@@ -19,8 +19,7 @@ class FakeModel(nn.Module):
 
 		)
 
-
-class TestAttributeGetter(unittest.TestCase):
+class TestAttributeGetAndSet(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.model = FakeModel()
@@ -56,6 +55,25 @@ class TestAttributeGetter(unittest.TestCase):
             ]
         )
 
+    def test_setattr(self):
+        model = FakeModel()
+        new_linear = nn.Linear(10, 10)
+
+        path_list = [['classifier'], 1]
+        setattr_by_path_list(model,path_list , new_linear )
+
+        self.assertEqual(
+            getattr_by_path_list(model,path_list),
+            new_linear
+        )
+
+        path_list = [['conv1']]
+        setattr_by_path_list(model,path_list , new_linear )
+        self.assertEqual(
+            getattr_by_path_list(model,path_list),
+            new_linear
+        )
+
 
 class TestLayerData(unittest.TestCase):
     def test_naming(self):
@@ -83,6 +101,11 @@ class TestQuantizer(unittest.TestCase):
         hashed_model = bit_quantizer.get_hashed_model()
         return
 
+class TestHashedConv(unittest.TestCase):
+    def test_replace_conv(self):
+        model = FakeModel()
+        model = use_hashed_conv(model)
+        self.assertTrue(isinstance(model.conv1,QuantConv2d))
 if __name__ == "__main__":
     unittest.main()
 

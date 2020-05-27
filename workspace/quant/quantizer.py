@@ -1,7 +1,9 @@
 import copy
 import torch
+import inspect
 import numpy as np
 import torch.nn as nn
+
 
 from tqdm.auto import tqdm
 from itertools import chain
@@ -92,8 +94,34 @@ def getattr_by_path_list(obj,path_list):
     attr = reduce(f,r)
     return attr
 
+def setattr_by_path_list(obj,input_path_list,val):
+    path_list = copy.deepcopy(input_path_list)
+    last_path = path_list.pop()
 
-# getting paths to conv and linear
+    def set_by_one(obj,l,val):
+        if isinstance(l,list):
+            t_obj = getattr_by_path_list(obj,l[:-1])
+            set_by_one(t_obj,l[-1],val)
+        elif isinstance(l,int):
+            obj[l]=val
+            return
+        elif isinstance(l,str):
+            setattr(obj,l,val)
+            return
+
+    # path list only had one element
+    if not path_list:
+        set_by_one(obj,last_path,val)
+        return
+    else:
+        t_obj = getattr_by_path_list(obj,path_list)
+        set_by_one(t_obj,last_path,val)
+
+        return
+
+
+
+# getting paths to all layers in model
 def get_layers_path(model,avoid = []):
     """
     Parameters:
@@ -296,15 +324,13 @@ class BitQuantizer:
 
 
 
+###
 
-### 
-
-class HashedConv(nn.Conv2d):
+class QuantConv2d(nn.Conv2d):
 
     def __init__(self,*args,**kwargs):
         # self.hash_optimizer == kwargs["hash_optimizer"] # one of 'mse','sgd','inv'
         # kwargs.pop("hash_optimizer")
-        self.hash_optimizer = "mse"
         super().__init__(*args,**kwargs)
         self.n_bits = 6
         self.n_fs = 64
@@ -314,10 +340,8 @@ class HashedConv(nn.Conv2d):
         self.n_out = self.weight.size()[0]
         self.n_fs = min(self.n_fs,self.n_out)
 
-        self.f_bins = torch.rand(self.n_fs,self.n_bits,).cuda()
+        self.f_bins = nn.Parameter(torch.rand(self.n_fs,self.n_bits,))
 
-        if self.hash_optimizer == "mse":
-            self.f_bins = nn.Parameter(self.f_bins)
 
         self.all_encodings = np.array(get_binary_encodings(self.n_bits))
         self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bits,n_bits]
@@ -330,8 +354,7 @@ class HashedConv(nn.Conv2d):
 
 
     def forward(self,x):
-
-        if self.hash_optimizer == "mse" and self.training:
+        if self.training:
             new_fs = []
             new_ws = []
             channel_step = self.out_channels//self.n_fs
@@ -366,66 +389,48 @@ class HashedConv(nn.Conv2d):
             weight_hashed = torch.cat(new_ws,axis=0)
             self.weight_hashed = weight_hashed
 
-        elif not self.hash_optimizer == "inv" and self.training:
-            # Calculating function coefficients
-            with torch.no_grad():
+            out = self.conv2d_forward(x,self.weight) + self.bias.unsqueeze(1).unsqueeze(1)
+            return out
 
-                w_master = self.weight.data.detach()
-
-                # Optimizing hashed weights
-                for _ in range(2):
-                    channel_step = self.out_channels//self.n_fs
-                    new_fs = []
-                    new_ws = []
-
-                    for fidx in range(0,self.n_fs):
-                        # select hash functions for the channel batch
-                        f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
-
-                        if fidx != self.n_fs-1:
-                            wx = w_master[fidx*channel_step:(fidx+1)*channel_step,:,:,: ] # [channel_step,inc,k,k]
-                        else:
-                            wx = w_master[fidx*channel_step:,:,:,: ] # [channel_step,inc,k,k]
-
-                        # finding encoding for qhich quant level is closest to w
-                        w = wx.reshape(-1,1)
-                        quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
-
-                        w = torch.abs( w - quant_levels.t()) # [m,2^nb]
-
-                        idx = torch.argmin(w,dim = -1)
-
-                        selected_encoding = self.all_encodings[idx] #[m,nbins]
-
-                        # From the selected encodings generate hash values
-                        new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
-                        new_ws.append(new_w)
-
-                        # optimizing coefficients which minimizes square loss with
-                        # current unhashed weights
-
-
-
-                        s = selected_encoding #[m,nb]
-                        psued_inv = torch.pinverse(s)
-                        f_new_bin = torch.matmul(psued_inv,wx.reshape(-1,1)) #[nb,1]
-                        new_fs.append(f_new_bin.t())
-
-
-
-                    new_fs = torch.cat(new_fs,axis=0)
-                    decay = 0.9
-                    self.f_bins -= (1 - decay) * (self.f_bins - new_fs)
-
-                weight_hashed = torch.cat(new_ws,axis=0)
-                self.weight_hashed = weight_hashed
-
-
-        if self.training:
-            r = self.conv2d_forward(x,self.weight) + self.bias.unsqueeze(1).unsqueeze(1)
-            return r
         else:
-            i = self.conv2d_forward(x,self.weight_hashed) + self.bias.unsqueeze(1).unsqueeze(1)
+            out = self.conv2d_forward(x,self.weight_hashed) + self.bias.unsqueeze(1).unsqueeze(1)
+            return out
 
-            return i
+
+def use_hashed_conv(model):
+    layer_paths = get_layers_path(model,avoid = [])
+    layers = [getattr_by_path_list(model,layer_path) for layer_path in layer_paths ]
+
+    conv_layers_with_path = [
+        (layer,layer_path) for layer,layer_path in zip(layers,layer_paths)
+            if isinstance(layer,nn.Conv2d)
+    ]
+
+    hashed_convs = []
+    # iterating through conv layers and creating kwargs
+    conv_attrs = [ param_name for param_name in inspect.signature(nn.Conv2d).parameters ]
+    # bias will be later copied from conv layer
+    # initializing bias directly after copying from init method
+    # of original layer will lead to error as, in nn.Conv2d bias is later changed
+    # according tovalue of parameter `bias`
+    conv_attrs.remove("bias")
+
+    for layer,layer_path in conv_layers_with_path:
+        kwargs = {
+            attr: copy.deepcopy(getattr(layer,attr))
+                for attr in conv_attrs
+        }
+        hashed_conv = QuantConv2d(**kwargs)
+        hashed_conv.weight = nn.Parameter(copy.deepcopy(layer.weight.clone().detach()))
+        hashed_conv.bias = nn.Parameter(copy.deepcopy(layer.bias.clone().detach()))
+        hashed_convs.append(hashed_conv)
+
+    # replacing conv layers with hasehd conv
+    for hashed_conv,(_,layer_path) in zip(hashed_convs,conv_layers_with_path):
+        setattr_by_path_list(model,layer_path,hashed_conv)
+    return model
+
+
+
+
 
