@@ -12,6 +12,25 @@ from functools import reduce,partial
 
 from base import *
 
+import numpy as np
+
+def serialize_boolean_array(array: np.array) -> bytes:
+    """
+    Takes a numpy.array with boolean values and converts it to a space-efficient
+    binary representation.
+    """
+    return np.packbits(array).tobytes()
+
+def deserialize_boolean_array(serialized_array: bytes, shape: tuple) -> np.array:
+    """
+    Inverse of serialize_boolean_array.
+    """
+    num_elements = np.prod(shape)
+    packed_bits = np.frombuffer(serialized_array, dtype='uint8')
+    result = np.unpackbits(packed_bits)[:num_elements]
+    result.shape = shape
+    return result
+
 def get_binary_encodings(n):
     """
     Generates all permutations of 1,-1 of length n
@@ -403,6 +422,86 @@ class QuantConv2d(nn.Conv2d):
             if self.bias is not None:
                 out+= self.bias.unsqueeze(1).unsqueeze(1)
             return out
+
+    def get_quantization_parameters(self):
+        new_fs = []
+        new_ws = []
+        channel_step = self.out_channels//self.n_fs
+        w_master = self.weight.data.detach()
+        new_encodings = []
+        encodings_size = []
+        wxs_size = []
+
+        for fidx in range(0,self.n_fs):
+            # select hash functions for the channel batch
+            f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
+            with torch.no_grad():
+                if fidx != self.n_fs-1:
+                    wx = w_master[fidx*channel_step:(fidx+1)*channel_step] # [channel_step,inc,k,k]
+                else:
+                    wx = w_master[fidx*channel_step:] # [channel_step,inc,k,k]
+
+                # finding encoding for qhich quant level is closest to w
+                w = wx.reshape(-1,1)
+                quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
+
+                w = torch.abs( w - quant_levels.t()) # [m,2^nb]
+
+                idx = torch.argmin(w,dim = -1)
+
+                selected_encoding = self.all_encodings[idx] #[m,nbins]
+
+                encodings_size.append(selected_encoding.shape)
+                wxs_size.append(wx.size())
+
+
+                selected_encoding[selected_encoding==-1] = 0
+                selected_encoding = selected_encoding.cpu().numpy().astype(np.uint8)
+
+                packbit = serialize_boolean_array(selected_encoding)
+                new_encodings.append( packbit )
+
+        return{
+            "functions" : self.f_bins.cpu(),
+            "encodings" : new_encodings,
+            "wxs_size" : wxs_size,
+            "n_bits" : self.n_bits,
+            "encodings_shape": encodings_size
+        }
+
+    def set_quantization_parameters(self,params):
+        self.f_bins = nn.Parameter(params["functions"])
+        self.n_bits = params["n_bits"]
+        new_ws = []
+
+        for i in range(self.f_bins.size()[0]):
+            f = self.f_bins[i]
+            packbit = params["encodings"][i]
+            shape = params["encodings_shape"][i]
+
+            encoding = deserialize_boolean_array(packbit,shape)
+            encoding = encoding.astype(np.float32)
+
+            encoding[encoding == 0] = -1
+
+            # print(encoding)
+
+
+            encoding = torch.from_numpy(encoding).float()
+            print(encoding.size())
+            w_size = params["wxs_size"][i]
+
+            new_w = torch.matmul(encoding,f).reshape(w_size)
+            new_ws.append(new_w)
+
+        weight_hashed = torch.cat(new_ws,axis=0)
+        weight_hashed = weight_hashed.cuda()
+        self.weight_hashed = weight_hashed
+        self.weight = nn.Parameter(weight_hashed)
+
+        return
+
+
 
 
 def use_hashed_conv(model,n_bits=6,n_functions=64):

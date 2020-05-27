@@ -24,12 +24,12 @@ def get_loss(labels,preds,model):
 
 if __name__ == "__main__":
     batch_size = 256
-    n_epochs = 50
+    n_epochs = 10
 
     trainloader,testloader = cifar10_loader(batch_size = batch_size,data_path="../data")
 
     model = resnet32()
-    model = quantizeModel(model)
+    model = quantizeModel(n_bits=2,n_functions=64)(model)
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters())

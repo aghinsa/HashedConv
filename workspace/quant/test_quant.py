@@ -105,7 +105,7 @@ class TestQuantizer(unittest.TestCase):
         return
 
 
-@quantizeModel()
+@quantizeModel(n_functions = 4,n_bits=2)
 class FakeQuantModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -140,6 +140,15 @@ class TestQuantConv(unittest.TestCase):
         x = torch.randn(2,3,28,28).cuda()
         x = model(x)
         self.assertGreater(float(model.get_hash_loss()),0)
+
+    def test_get_quant_params(self):
+        torch.manual_seed(0)
+        model = FakeQuantModel()
+        model.cuda()
+
+        params = model.conv1.get_quantization_parameters()
+        model.conv1.set_quantization_parameters(params)
+
 
 if __name__ == "__main__":
     unittest.main()
