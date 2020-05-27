@@ -9,6 +9,26 @@ from functools import reduce,partial
 
 from base import *
 
+def get_binary_encodings(n):
+    """
+    Generates all permutations of 1,-1 of length n
+
+    Eg:
+        >>> get_binary_encodings(2)
+
+        [ [-1,-1],[-1,1],[1,-1],[1,1] ]
+    """
+    ans = []
+    low = (1<<n)
+    high = (low << 1)
+
+    for tx in range(low,high):
+        tans = [-1]*n
+        for j in range(n):
+            if tx & (1<<j) :
+                tans[j]=1
+        ans.append(tans)
+    return np.array(ans)
 
 def getattr_by_dot_path_list(obj,qual_path):
     """
@@ -162,7 +182,7 @@ class BitQuantizer:
         if self.verbose == 2:
             print(f"Layers detected : {[x.layer_name for x in self.layer_datas ]}")
 
-        self.all_encodings = self.get_binary_encodings(self.n_bits)
+        self.all_encodings = get_binary_encodings(self.n_bits)
         self.all_encodings = torch.from_numpy(self.all_encodings).float().cuda()
 
         self.init_hash_functions()
@@ -198,27 +218,6 @@ class BitQuantizer:
             layer_data.n_fs = layer_n_fs
             layer_data.w = w
             layer_data.n_out = w.size()[0]
-
-    def get_binary_encodings(self,n):
-        """
-        Generates all permutations of 1,-1 of length n
-
-        Eg:
-            >>> get_binary_encodings(2)
-
-            [ [-1,-1],[-1,1],[1,-1],[1,1] ]
-        """
-        ans = []
-        low = (1<<n)
-        high = (low << 1)
-
-        for tx in range(low,high):
-            tans = [-1]*n
-            for j in range(n):
-                if tx & (1<<j) :
-                    tans[j]=1
-            ans.append(tans)
-        return np.array(ans)
 
     def train_hash_functions_for_layer(self,layer_data,n_iter = 100):
         w_master = layer_data.w
@@ -294,4 +293,139 @@ class BitQuantizer:
         for layer_data in self.layer_datas:
             getattr_by_path_list(model,layer_data.qual_path).weight = nn.Parameter(layer_data.hashed_weight)
         return model
+
+
+
+
+### 
+
+class HashedConv(nn.Conv2d):
+
+    def __init__(self,*args,**kwargs):
+        # self.hash_optimizer == kwargs["hash_optimizer"] # one of 'mse','sgd','inv'
+        # kwargs.pop("hash_optimizer")
+        self.hash_optimizer = "mse"
+        super().__init__(*args,**kwargs)
+        self.n_bits = 6
+        self.n_fs = 64
+
+        # w size (outc,inc,k,k)
+
+        self.n_out = self.weight.size()[0]
+        self.n_fs = min(self.n_fs,self.n_out)
+
+        self.f_bins = torch.rand(self.n_fs,self.n_bits,).cuda()
+
+        if self.hash_optimizer == "mse":
+            self.f_bins = nn.Parameter(self.f_bins)
+
+        self.all_encodings = np.array(get_binary_encodings(self.n_bits))
+        self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bits,n_bits]
+        self.all_encodings = self.all_encodings.float().cuda()
+
+        self.weight_hashed = self.weight.data
+
+        self.hash_loss = 0
+        self.mse = nn.MSELoss(reduction = "mean")
+
+
+    def forward(self,x):
+
+        if self.hash_optimizer == "mse" and self.training:
+            new_fs = []
+            new_ws = []
+            channel_step = self.out_channels//self.n_fs
+            w_master = self.weight.data.detach()
+            self.hash_loss = 0
+            for fidx in range(0,self.n_fs):
+                # select hash functions for the channel batch
+                f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
+                with torch.no_grad():
+
+
+                    if fidx != self.n_fs-1:
+                        wx = w_master[fidx*channel_step:(fidx+1)*channel_step] # [channel_step,inc,k,k]
+                    else:
+                        wx = w_master[fidx*channel_step:] # [channel_step,inc,k,k]
+
+                    # finding encoding for qhich quant level is closest to w
+                    w = wx.reshape(-1,1)
+                    quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
+
+                    w = torch.abs( w - quant_levels.t()) # [m,2^nb]
+
+                    idx = torch.argmin(w,dim = -1)
+
+                    selected_encoding = self.all_encodings[idx] #[m,nbins]
+
+                # From the selected encodings generate hash values
+                new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
+                self.hash_loss += self.mse(new_w,wx)
+                new_ws.append(new_w)
+
+            weight_hashed = torch.cat(new_ws,axis=0)
+            self.weight_hashed = weight_hashed
+
+        elif not self.hash_optimizer == "inv" and self.training:
+            # Calculating function coefficients
+            with torch.no_grad():
+
+                w_master = self.weight.data.detach()
+
+                # Optimizing hashed weights
+                for _ in range(2):
+                    channel_step = self.out_channels//self.n_fs
+                    new_fs = []
+                    new_ws = []
+
+                    for fidx in range(0,self.n_fs):
+                        # select hash functions for the channel batch
+                        f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
+
+                        if fidx != self.n_fs-1:
+                            wx = w_master[fidx*channel_step:(fidx+1)*channel_step,:,:,: ] # [channel_step,inc,k,k]
+                        else:
+                            wx = w_master[fidx*channel_step:,:,:,: ] # [channel_step,inc,k,k]
+
+                        # finding encoding for qhich quant level is closest to w
+                        w = wx.reshape(-1,1)
+                        quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
+
+                        w = torch.abs( w - quant_levels.t()) # [m,2^nb]
+
+                        idx = torch.argmin(w,dim = -1)
+
+                        selected_encoding = self.all_encodings[idx] #[m,nbins]
+
+                        # From the selected encodings generate hash values
+                        new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
+                        new_ws.append(new_w)
+
+                        # optimizing coefficients which minimizes square loss with
+                        # current unhashed weights
+
+
+
+                        s = selected_encoding #[m,nb]
+                        psued_inv = torch.pinverse(s)
+                        f_new_bin = torch.matmul(psued_inv,wx.reshape(-1,1)) #[nb,1]
+                        new_fs.append(f_new_bin.t())
+
+
+
+                    new_fs = torch.cat(new_fs,axis=0)
+                    decay = 0.9
+                    self.f_bins -= (1 - decay) * (self.f_bins - new_fs)
+
+                weight_hashed = torch.cat(new_ws,axis=0)
+                self.weight_hashed = weight_hashed
+
+
+        if self.training:
+            r = self.conv2d_forward(x,self.weight) + self.bias.unsqueeze(1).unsqueeze(1)
+            return r
+        else:
+            i = self.conv2d_forward(x,self.weight_hashed) + self.bias.unsqueeze(1).unsqueeze(1)
+
+            return i
 

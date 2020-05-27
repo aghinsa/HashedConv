@@ -12,11 +12,10 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 from alexnet import AlexNet as AlexNetNoHash
-from utils import evaluate,cifar10_loader,get_weight_bins
+from utils import evaluate,cifar10_loader
 from torch.distributions import Categorical
-from sklearn.linear_model import SGDRegressor
 
-from quant_utils import get_binary_encodings
+from quantizer import HashedConv
 
 BATCH_SIZE = 2048
 N_EPOCHS = 1000
@@ -36,92 +35,7 @@ def init_by_power(n):
     l = torch.from_numpy(l).float()
     return l
 
-class HashedConv(nn.Conv2d):
 
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
-        self.n_bins = 6
-        self.n_fs = 64
-
-        # w size (outc,inc,k,k)
-
-        self.n_out = self.weight.size()[0]
-        self.n_fs = min(self.n_fs,self.n_out)
-        self.f_bins = torch.rand(self.n_fs,self.n_bins,).cuda()
-
-        self.all_encodings = np.array(get_binary_encodings(self.n_bins))
-        self.all_encodings = torch.from_numpy(self.all_encodings) # [2^n_bins,n_bins]
-        self.all_encodings = self.all_encodings.float().cuda()
-
-        self.sgd = SGDRegressor(max_iter=100, tol=1e-3,warm_start=True)
-        self.weight_hashed = self.weight.data
-
-    def forward(self,x):
-
-        # Calculating function coefficients
-        with torch.no_grad():
-
-            w_master = self.weight.data.detach()
-
-            # Optimizing hashed weights
-            if self.training:
-                for _ in range(2):
-                    channel_step = self.out_channels//self.n_fs
-                    new_fs = []
-                    new_ws = []
-
-                    for fidx in range(0,self.n_fs):
-                        # select hash functions for the channel batch
-                        f = self.f_bins[fidx].reshape(-1,1) #[nb,1]
-
-                        if fidx != self.n_fs-1:
-                            wx = w_master[fidx*channel_step:(fidx+1)*channel_step,:,:,: ] # [channel_step,inc,k,k]
-                        else:
-                            wx = w_master[fidx*channel_step:,:,:,: ] # [channel_step,inc,k,k]
-
-                        # finding encoding for qhich quant level is closest to w
-                        w = wx.reshape(-1,1)
-                        quant_levels = torch.matmul(self.all_encodings, f) # [2^nb,1]
-
-                        w = torch.abs( w - quant_levels.t()) # [m,2^nb]
-
-                        idx = torch.argmin(w,dim = -1)
-
-                        selected_encoding = self.all_encodings[idx] #[m,nbins]
-
-                        # From the selected encodings generate hash values
-                        new_w = torch.matmul(selected_encoding,f).reshape(wx.size())
-                        new_ws.append(new_w)
-
-                        # optimizing coefficients which minimizes square loss with
-                        # current unhashed weights
-                        if self.training:
-
-                            # self.sgd.fit(selected_encoding.cpu(),wx.reshape(-1).cpu())
-                            # f_new_bin = self.sgd.coef_
-                            # f_new_bin = torch.from_numpy(f_new_bin).reshape(1,-1).float().cuda()
-                            # new_fs.append(f_new_bin)
-
-                            s = selected_encoding #[m,nb]
-                            psued_inv = torch.pinverse(s)
-                            f_new_bin = torch.matmul(psued_inv,wx.reshape(-1,1)) #[nb,1]
-                            new_fs.append(f_new_bin.t())
-
-                    new_fs = torch.cat(new_fs,axis=0)
-                    decay = 0.9
-                    self.f_bins -= (1 - decay) * (self.f_bins - new_fs)
-
-                weight_hashed = torch.cat(new_ws,axis=0)
-                self.weight_hashed = weight_hashed
-
-
-        if self.training:
-            r = self.conv2d_forward(x,self.weight) + self.bias.unsqueeze(1).unsqueeze(1)
-            return r
-        else:
-            i = self.conv2d_forward(x,self.weight_hashed) + self.bias.unsqueeze(1).unsqueeze(1)
-
-            return i
 
 
 class AlexNet(nn.Module):
@@ -183,6 +97,9 @@ class AlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
+    def get_hash_loss(self):
+        return self.conv1.hash_loss + self.conv2.hash_loss + self.conv3.hash_loss + self.conv4.hash_loss + self.conv5.hash_loss
+
 
 
 def get_loss(labels,preds,model):
@@ -218,7 +135,7 @@ if __name__ == "__main__":
             preds = model(inputs)
             _,logits = torch.max(preds,1)
 
-            loss= get_loss(labels,preds,model)
+            loss= get_loss(labels,preds,model) + model.get_hash_loss()
             loss.backward()
             optimizer.step()
             writer.add_scalar('loss/train', loss , global_step)
@@ -242,7 +159,7 @@ if __name__ == "__main__":
             print(f"\teval_test Accuracy : {test_acc}")
             print(f"\teval_train Accuracy : {train_acc}")
             model.train()
-        
+
         if epoch%5 == 0:
             torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
 
