@@ -105,7 +105,7 @@ class TestQuantizer(unittest.TestCase):
         return
 
 
-@quantizeModel
+@quantizeModel()
 class FakeQuantModel(nn.Module):
     def __init__(self):
         super().__init__()

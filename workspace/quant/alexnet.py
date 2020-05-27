@@ -11,6 +11,8 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from utils import evaluate,cifar10_loader
 
+from quantizer import quantizeModel
+
 BATCH_SIZE = 4096
 N_EPOCHS = 50
 NUM_CLASSES = 10
@@ -118,7 +120,7 @@ if __name__ == "__main__":
             _,logits = torch.max(preds,1)
 
             loss= get_loss(labels,preds)
-    
+
             loss.backward()
             optimizer.step()
 

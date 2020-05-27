@@ -302,8 +302,7 @@ class BitQuantizer:
             hashed_weight = torch.cat(new_ws,axis=0)
             layer_data.hashed_weight = hashed_weight
 
-        # Check if layer data is getting updates
-        # setattr(self,layer_name,layer_data)
+
         return
 
     def train_hash_functions(self,n_iter):
@@ -325,19 +324,23 @@ class BitQuantizer:
 
 
 
-###
 
 class QuantConv2d(nn.Conv2d):
 
     def __init__(self,*args,**kwargs):
-        # self.hash_optimizer == kwargs["hash_optimizer"] # one of 'mse','sgd','inv'
-        # kwargs.pop("hash_optimizer")
-        super().__init__(*args,**kwargs)
         self.n_bits = 6
         self.n_fs = 64
+        if "n_bits" in kwargs:
+            self.n_bits = kwargs["n_bits"]
+            kwargs.pop("n_bits")
+        if "n_functions" in kwargs:
+            self.n_fs = kwargs["n_functions"]
+            kwargs.pop("n_functions")
+
+        super().__init__(*args,**kwargs)
+
 
         # w size (outc,inc,k,k)
-
         self.n_out = self.weight.size()[0]
         self.n_fs = min(self.n_fs,self.n_out)
 
@@ -390,15 +393,19 @@ class QuantConv2d(nn.Conv2d):
             weight_hashed = torch.cat(new_ws,axis=0)
             self.weight_hashed = weight_hashed
 
-            out = self.conv2d_forward(x,self.weight) + self.bias.unsqueeze(1).unsqueeze(1)
+            out = self.conv2d_forward(x,self.weight)
+            if self.bias is not None:
+                out+= self.bias.unsqueeze(1).unsqueeze(1)
             return out
 
         else:
-            out = self.conv2d_forward(x,self.weight_hashed) + self.bias.unsqueeze(1).unsqueeze(1)
+            out = self.conv2d_forward(x,self.weight_hashed)
+            if self.bias is not None:
+                out+= self.bias.unsqueeze(1).unsqueeze(1)
             return out
 
 
-def use_hashed_conv(model):
+def use_hashed_conv(model,n_bits=6,n_functions=64):
     layer_paths = get_layers_path(model,avoid = [])
     layers = [getattr_by_path_list(model,layer_path) for layer_path in layer_paths ]
 
@@ -421,10 +428,16 @@ def use_hashed_conv(model):
             attr: copy.deepcopy(getattr(layer,attr))
                 for attr in conv_attrs
         }
+        kwargs["n_bits"] = n_bits
+        kwargs["n_functions"] = n_functions
+
         hashed_conv = QuantConv2d(**kwargs)
         hashed_conv.weight = nn.Parameter(copy.deepcopy(layer.weight.clone().detach()))
-        hashed_conv.bias = nn.Parameter(copy.deepcopy(layer.bias.clone().detach()))
-        hashed_convs.append(hashed_conv)
+        if layer.bias is not None:
+            hashed_conv.bias = nn.Parameter(copy.deepcopy(layer.bias.clone().detach()))
+            hashed_convs.append(hashed_conv)
+        else:
+            hashed_conv.bias = None
 
     # replacing conv layers with hasehd conv
     for hashed_conv,(_,layer_path) in zip(hashed_convs,conv_layers_with_path):
@@ -432,8 +445,8 @@ def use_hashed_conv(model):
     return model
 
 
-def quantize_model_instance(model):
-    model = use_hashed_conv(model)
+def quantize_model_instance(model,n_bits=6,n_functions=64):
+    model = use_hashed_conv(model,n_bits,n_functions)
 
     layer_paths = get_layers_path(model,avoid = [])
     layers = [getattr_by_path_list(model,layer_path) for layer_path in layer_paths ]
@@ -451,19 +464,21 @@ def quantize_model_instance(model):
     model.get_hash_loss = types.MethodType(get_hash_loss,model)
     return model
 
+def quantizeModel(n_bits=6,n_functions=64):
 
-def quantizeModel(model_def):
-    if isinstance(model_def,nn.Module):
-        return quantize_model_instance(model_def)
+    def _quantizeModel(model_def):
+        if isinstance(model_def,nn.Module):
+            return quantize_model_instance(model_def,n_bits,n_functions)
 
-    if inspect.isclass(model_def):
-        class QuantizedModelDef:
-            def __new__(cls,*args,**kwargs):
-                model = model_def(*args,**kwargs)
-                model = quantize_model_instance(model)
-                return model
+        if inspect.isclass(model_def):
+            class QuantizedModelDef:
+                def __new__(cls,*args,**kwargs):
+                    model = model_def(*args,**kwargs)
+                    model = quantize_model_instance(model,n_bits,n_functions)
+                    return model
 
-        return QuantizedModelDef
+            return QuantizedModelDef
+    return _quantizeModel
 
 
 
