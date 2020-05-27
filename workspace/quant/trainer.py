@@ -24,11 +24,12 @@ def get_loss(labels,preds,model):
 
 if __name__ == "__main__":
     batch_size = 256
-    n_epochs = 20
+    n_epochs = 100
 
     trainloader,testloader = cifar10_loader(batch_size = batch_size,data_path="../data")
 
     model = resnet32()
+    model_name = "resnet_quantized"
     model = quantizeModel(n_bits=6,n_functions=64)(model)
     model.cuda()
 
@@ -99,6 +100,6 @@ if __name__ == "__main__":
 
 
     model.copy_hashed_weights()
-    torch.save(model.state_dict(), f"./checkpoint/model_{epoch}")
+    torch.save(model.state_dict(), f"./checkpoint/{model_name}")
     print('Finished Training')
 

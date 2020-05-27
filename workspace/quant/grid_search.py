@@ -15,10 +15,9 @@ from utils import cifar10_loader,evaluate
 from pytorch_resnet.resnet import resnet20,resnet32,resnet44,resnet56,resnet110
 
 TrainConfig = namedtuple("TrainConfig",["n_functions","n_bits","n_iter","model_name"])
-VERBOSE = 0
 
-def load_resnet(name):
-    checkpoint = torch.load(f"./pytorch_resnet/pretrained_models/{name}.th")
+def load_resnet(ckpt_path):
+    checkpoint = torch.load(ckpt_path)
     state = { k.replace('module.',''):v for k,v in checkpoint['state_dict'].items() }
     return state
 
@@ -72,6 +71,7 @@ def train_model_hash(model,train_config):
 
 
 if __name__ == "__main__":
+    VERBOSE = 0
 
     # models
     # model_names = ["AlexNet","resnet20","resnet32","resnet44","resnet56","resnet110"]
@@ -87,10 +87,11 @@ if __name__ == "__main__":
 
     model_names = ["resnet20","resnet32","resnet44"]
     models = [resnet20,resnet32,resnet44]
+    fp = lambda name:f"./pytorch_resnet/pretrained_models/{name}.th"
     load_fns = [
-        partial(load_resnet,"resnet20"),
-        partial(load_resnet,"resnet32"),
-        partial(load_resnet,"resnet44"),
+        partial(load_resnet,fp("resnet20")),
+        partial(load_resnet,fp("resnet32")),
+        partial(load_resnet,fp("resnet44")),
     ]
 
     # parameters
