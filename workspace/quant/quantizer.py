@@ -279,17 +279,19 @@ class BitQuantizer:
         return
 
     def train_hash_functions(self,n_iter):
-        for layer_data in self.layer_datas:
+        disable_tqdm = self.verbose < 1
+        for layer_data in tqdm(self.layer_datas,disable = disable_tqdm):
+
             if self.verbose == 1:
                 print(f"Hashing layer: {layer_data.layer_name}")
             self.train_hash_functions_for_layer(layer_data,n_iter)
+
             if self.verbose == 1:
                 print()
 
     def get_hashed_model(self):
         model = copy.deepcopy(self.model)
-        disable_tqdm = self.verbose < 1
-        for layer_data in tqdm(self.layer_datas,disable = disable_tqdm):
+        for layer_data in self.layer_datas:
             getattr_by_path_list(model,layer_data.qual_path).weight = nn.Parameter(layer_data.hashed_weight)
         return model
 

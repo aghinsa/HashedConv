@@ -63,6 +63,8 @@ def train_quantizer(model,train_config,n_epochs = 1000):
         if 'out of memory' in str(e) :
             print(f'| WARNING: ran out of memory,skipping {train_config}')
             torch.cuda.empty_cache()
+        else:
+            raise e
 
 
 if __name__ == "__main__":
@@ -115,7 +117,7 @@ if __name__ == "__main__":
 
         print(f"\nModel: {model_name} \n")
 
-        hashed_model,bit_quantizer = train_quantizer(model,config,n_epochs = 1)
+        hashed_model,bit_quantizer = train_quantizer(model,config,n_epochs = 1000)
 
         with open(f"{model_name}_quantizer",'wb+') as f:
             dill.dump(bit_quantizer,f)

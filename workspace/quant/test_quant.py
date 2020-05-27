@@ -75,7 +75,8 @@ class TestQuantizer(unittest.TestCase):
                     model,
                     n_fs,
                     n_bits,
-                    avoid=[]
+                    avoid=[],
+                    verbose = 0
              )
 
         bit_quantizer.train_hash_functions(n_iter = n_iter)
