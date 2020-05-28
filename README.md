@@ -1,14 +1,13 @@
 # Quantized Convolutional layer
 
-Provides two classes which quantized weights of pytorch models.
+Provides two methods to quantize weights of pytorch models.
 - quantizeModel : Optimizes hash loss when training
-- BitQuantizer : Finds quantized values by minimizing $E[(q(w)-w)^2]$, uses psuedo inverse least square solution.
-
+- BitQuantizer : Finds quantized values by minimizing ![formula](https://render.githubusercontent.com/render/math?math=$E[(q(w)-w)^2]$), uses psuedo inverse least square solution.
 ## Usages
 - ### QuantConv2d
 
 ```py
-from quantizer import quantizeModel
+from quantizer import quantizeModel,QuantConv2d
 
 @quantizeModel(n_functions = 4,n_bits=2)
 class MyModel(nn.Module):
