@@ -1,0 +1,15 @@
+artifact_uri: file:///home/aghinsa/Documents/workspace/The_Eye/global/HashedConv/workspace/quant/mlruns/0/3340a6d40dab4e75895c8e08d9c16cae/artifacts
+end_time: 1590517463781
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+name: ''
+run_id: 3340a6d40dab4e75895c8e08d9c16cae
+run_uuid: 3340a6d40dab4e75895c8e08d9c16cae
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1590517463764
+status: 3
+tags: []
+user_id: aghinsa
