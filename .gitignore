@@ -1,9 +1,8 @@
 *.pdf
-*.zip
 *.png
 *.pth
+*.th
 *.tar
-*.ipynb
 __pycache__/
 checkpoint/
 checkpoints/
@@ -12,5 +11,3 @@ logs/
 data/
 runs/
 docs/
-.ipynb_checkpoints/
-graph/
