@@ -44,6 +44,13 @@ hashed_model = bit_quantizer.get_hashed_model()
 
 ```
 
+## Other Methods
+- ### Linear-Thresholding
+Experiments done using LeNet on CIFAR10 dataset. 
+- ### Polynomial-Hashing 
+Experiments are done using LeNet on FashionMNIST and CIFAR10 dataset - training from scratch. 
+Experiments also done using ResNet34 on CIFAR10 - both training from scratch and using pretrained models.
+
 # References
 - [LQ-Nets: Learned Quantization for Highly Accurate and Compact Deep Neural Networks](https://arxiv.org/abs/1807.10029)
 - [A Deep Look into Logarithmic Quantization of ModelParameters in Neural Networks](https://dl.acm.org/doi/pdf/10.1145/3291280.3291800)
