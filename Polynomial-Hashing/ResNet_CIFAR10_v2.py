@@ -41,6 +41,7 @@ model_dict = res34.state_dict()
 model_dict.update(new_dict)
 res34.load_state_dict(model_dict)
 
+# only update the parameters corresponding to hashing
 update_params = []
 for module in res34.modules():
     if(isinstance(module, HashedConv2d)):

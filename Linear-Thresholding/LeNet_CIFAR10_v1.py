@@ -12,13 +12,6 @@ import torch.optim as optim
 
 from Hashed import HashedConv2d
 
-# global variables
-BATCH_SIZE = 100
-EPOCH = 50
-LAMBDA = 0.01
-GAMMA = 10
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 # functions to show an image
 def imshow(img):
     img = img / 2 + 0.5     # unnormalize
@@ -62,6 +55,12 @@ class LeNet(nn.Module):
         return out, out_hash, c1, hc1, c2, hc2
     
 if __name__ == "__main__":
+    # global variables
+    BATCH_SIZE = 100
+    EPOCH = 50
+    LAMBDA = 0.01
+    GAMMA = 10
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # transforms
     transform = transforms.Compose(

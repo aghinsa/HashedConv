@@ -45,11 +45,15 @@ hashed_model = bit_quantizer.get_hashed_model()
 ```
 
 ## Other Methods
-- ### Linear-Thresholding
-Experiments done using LeNet on CIFAR10 dataset. 
-- ### Polynomial-Hashing 
-Experiments are done using LeNet on FashionMNIST and CIFAR10 dataset - training from scratch. 
-Experiments also done using ResNet34 on CIFAR10 - both training from scratch and using pretrained models.
+
+### Linear-Thresholding
+- Each forward pass, the weights are distributed based on a linear scale from min-weight to max-weight into the specified number of buckets. The weight corresponding to each bucket is a learnable parameter.
+- Experiments done using LeNet on CIFAR10 dataset. 
+
+### Polynomial-Hashing 
+- A 2nd degree polynomial is maintained for each bucket which has a fized weight. A high-temperature softmax over the function values classifies each weight into a corresponding bucket.
+- Experiments are done using LeNet on FashionMNIST and CIFAR10 dataset - training from scratch. 
+- Experiments also done using ResNet34 on CIFAR10 - both training from scratch and using pretrained models.
 
 # References
 - [LQ-Nets: Learned Quantization for Highly Accurate and Compact Deep Neural Networks](https://arxiv.org/abs/1807.10029)
