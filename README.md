@@ -45,6 +45,7 @@ hashed_model = bit_quantizer.get_hashed_model()
 ```
 
 # References
+- [ResNet modules](https://github.com/akamaster/pytorch_resnet_cifar10)
 - [LQ-Nets: Learned Quantization for Highly Accurate and Compact Deep Neural Networks](https://arxiv.org/abs/1807.10029)
 - [A Deep Look into Logarithmic Quantization of ModelParameters in Neural Networks](https://dl.acm.org/doi/pdf/10.1145/3291280.3291800)
 - [Bit Efficient Quantization for Deep Neural Networks](https://arxiv.org/pdf/1910.04877.pdf)
