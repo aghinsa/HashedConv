@@ -9,6 +9,7 @@
 - The file `resnet.py` has the model spec for the hashed versions of all **ResNet** architectures. 
 - The file `ResNet_CIFAR10_v1.py` has the training code for **ResNet34** architecture on the **CIFAR10** dataset. Only the `Conv2d` layers have been hashed. Model is being trained from scratch.
 - The file `ResNet_CIFAR10_v2.py` has the training code for **ResNet34** architecture on the **CIFAR10** dataset. Only the `Conv2d` layers have been hashed. A pretrained model is imported and only the hashing parameters are being trained.
+- The `mlruns` folder contains experiments with different number of buckets for the `Conv2d` layers on the **LeNet** architecture with the **CIFAR10** dataset, code is the same as in `LeNet_CIFAR10_v2.py`.
 
 # References
 - [ResNet implementation](https://github.com/kuangliu/pytorch-cifar)
