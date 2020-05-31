@@ -1,0 +1,15 @@
+artifact_uri: file:///content/drive/My%20Drive/SysDL_Project/mlruns/0/838f1e57fd114ec9a4aaeea61ad300ca/artifacts
+end_time: 1590609173876
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+name: ''
+run_id: 838f1e57fd114ec9a4aaeea61ad300ca
+run_uuid: 838f1e57fd114ec9a4aaeea61ad300ca
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1590607311094
+status: 3
+tags: []
+user_id: root

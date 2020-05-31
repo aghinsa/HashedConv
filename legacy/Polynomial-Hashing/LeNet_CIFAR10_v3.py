@@ -65,9 +65,9 @@ class LeNet(nn.Module):
 if __name__ == "__main__":
     # global variables
     BATCH_SIZE = 100
-    EPOCH = 50
-    GAMMA = 100
-    LR = 1e-3
+    EPOCH = 100
+    GAMMA = 10
+    LR = 1e-4
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     VERSION = 2
 
@@ -84,10 +84,6 @@ if __name__ == "__main__":
     testset = torchvision.datasets.CIFAR10(
         root="./data", train=False, download=True, transform=transform
     )
-    # trainset = torchvision.datasets.FashionMNIST(root='./data', train=True,
-    #                                         download=True, transform=transform)
-    # testset = torchvision.datasets.FashionMNIST(root='./data', train=False,
-    #                                         download=True, transform=transform)
 
     # dataloaders
     trainloader = torch.utils.data.DataLoader(
@@ -119,15 +115,13 @@ if __name__ == "__main__":
     optimizer = optim.Adam(net.parameters(), lr=LR)
 
     net.to(DEVICE)
-    # print(net.conv1.values)
-    # print(net.conv1.a0)
+
     loss_epoch = []
     loss_batch = []
     loss_epoch_hash = []
     loss_batch_hash = []
     for epoch in range(EPOCH):  # loop over the dataset multiple times
 
-        # running_loss = 0.0
         running_criterion = 0.0
         running_criterion_hash = 0.0
         pl_loss = 0.0
@@ -146,7 +140,6 @@ if __name__ == "__main__":
             optimizer.step()
 
             # print statistics
-            # running_loss += loss.item()
             running_criterion += criterion(out, labels).item()
             running_criterion_hash += criterion(out_hash, labels).item()
             pr = 100
@@ -157,19 +150,16 @@ if __name__ == "__main__":
                 )
                 loss_batch.append(running_criterion)
                 loss_batch_hash.append(running_criterion_hash)
-            # print(net.conv1.conv_weight)
-            # print(net.conv1.hash_weight)
+
             pl_loss += running_criterion
             pl_loss_hash += running_criterion_hash
-            # running_loss = 0.0
+
             running_criterion = 0.0
             running_criterion_hash = 0.0
         loss_epoch.append(pl_loss / (i + 1))
         loss_epoch_hash.append(pl_loss_hash / (i + 1))
 
     print("Finished Training")
-    # print(net.conv1.values)
-    # print(net.conv1.a0)
 
     correct = 0
     total = 0

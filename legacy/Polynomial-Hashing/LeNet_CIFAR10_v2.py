@@ -61,10 +61,10 @@ class LeNet(nn.Module):
 
 if __name__ == "__main__":
     # global variables
-    BATCH_SIZE = 500
-    EPOCH = 50
-    LAMBDA = 1
+    BATCH_SIZE = 100
+    EPOCH = 100
     GAMMA = 10
+    LR = 1e-4
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # transforms
@@ -106,7 +106,7 @@ if __name__ == "__main__":
 
     criterion = nn.CrossEntropyLoss()
     mse = nn.MSELoss()
-    optimizer = optim.Adam(net.parameters(), lr=1e-3)
+    optimizer = optim.Adam(net.parameters(), lr=LR)
 
     net.to(DEVICE)
 
@@ -122,9 +122,7 @@ if __name__ == "__main__":
 
             # forward + backward + optimize
             out, out_hash = net(inputs)
-            loss = criterion(out, labels) + GAMMA * (
-                criterion(out_hash, labels)
-            )  # + LAMBDA*(mse(c1, hc1) + mse(c2, hc2))
+            loss = criterion(out, labels) + GAMMA * (criterion(out_hash, labels))
             loss.backward()
             optimizer.step()
 
