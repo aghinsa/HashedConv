@@ -29,8 +29,8 @@ if __name__ == "__main__":
     trainloader, testloader = cifar10_loader(batch_size=batch_size, data_path="./data")
 
     model = resnet32()
-    model_name = "resnet32_no_hash"
-    # model = quantizeModel(n_bits=6, n_functions=64)(model)
+    model_name = "resnet32_quantized_20_epochs"
+    model = quantizeModel(n_bits=6, n_functions=64)(model)
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters())
@@ -51,8 +51,8 @@ if __name__ == "__main__":
             preds = model(inputs)
             _, logits = torch.max(preds, 1)
 
-            # loss = get_loss(labels, preds, model) + model.get_hash_loss()
-            loss = get_loss(labels, preds, model)
+            loss = get_loss(labels, preds, model) + model.get_hash_loss()
+            # loss = get_loss(labels, preds, model)
 
             loss.backward()
             optimizer.step()
@@ -90,6 +90,6 @@ if __name__ == "__main__":
                 epoch,
             )
 
-    # model.copy_hashed_weights()
+    model.copy_hashed_weights()
     torch.save(model.state_dict(), f"./checkpoint/{model_name}")
     print("Finished Training")

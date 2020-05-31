@@ -48,6 +48,7 @@ hashed_model = bit_quantizer.get_hashed_model()
 
 ## Directory Structure
 
+- `inference/` : Data,plots and notebook to generate the same.
 - `alexnet.py` : Modle definition for alexnet and code to train.
 - `base.py` : Definitons of classes used in other modules.
 - `quantizer` : Main module in which quantization logic is implemented.
